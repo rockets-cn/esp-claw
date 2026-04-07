@@ -5,6 +5,7 @@
  */
 #include "claw_event_router.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -35,46 +36,6 @@ static const char *TAG = "claw_event_router";
 #define CLAW_EVENT_ROUTER_FIELD_SIZE               96
 #define CLAW_EVENT_ROUTER_cap_SIZE          64
 #define CLAW_EVENT_ROUTER_BINDING_SIZE             16
-
-typedef enum {
-    CLAW_EVENT_ROUTER_ACTION_CALL_cap = 0,
-    CLAW_EVENT_ROUTER_ACTION_RUN_AGENT = 1,
-    CLAW_EVENT_ROUTER_ACTION_RUN_SCRIPT = 2,
-    CLAW_EVENT_ROUTER_ACTION_SEND_MESSAGE = 3,
-    CLAW_EVENT_ROUTER_ACTION_EMIT_EVENT = 4,
-    CLAW_EVENT_ROUTER_ACTION_DROP = 5,
-} claw_event_router_action_kind_t;
-
-typedef struct {
-    char event_type[CLAW_EVENT_ROUTER_FIELD_SIZE];
-    char event_key[CLAW_EVENT_ROUTER_FIELD_SIZE];
-    char source_cap[CLAW_EVENT_ROUTER_FIELD_SIZE];
-    char channel[CLAW_EVENT_ROUTER_FIELD_SIZE];
-    char chat_id[CLAW_EVENT_ROUTER_FIELD_SIZE];
-    char content_type[CLAW_EVENT_ROUTER_FIELD_SIZE];
-    char text[CLAW_EVENT_ROUTER_FIELD_SIZE];
-} claw_event_router_match_t;
-
-typedef struct {
-    claw_event_router_action_kind_t kind;
-    char cap[CLAW_EVENT_ROUTER_cap_SIZE];
-    char *input_json;
-    claw_cap_caller_t caller;
-    bool capture_output;
-    bool fail_open;
-} claw_event_router_action_t;
-
-typedef struct {
-    bool enabled;
-    bool consume_on_match;
-    char id[CLAW_EVENT_ROUTER_ID_SIZE];
-    char description[CLAW_EVENT_ROUTER_DESC_SIZE];
-    char ack[CLAW_EVENT_ROUTER_ACK_SIZE];
-    char *vars_json;
-    claw_event_router_match_t match;
-    claw_event_router_action_t *actions;
-    size_t action_count;
-} claw_event_router_rule_t;
 
 typedef struct {
     char channel[24];
@@ -109,10 +70,20 @@ static claw_event_router_runtime_t s_runtime = {
     .next_request_id = 1000000,
 };
 
+static cJSON *claw_event_router_rule_to_json(const claw_event_router_rule_t *rule);
+static esp_err_t claw_event_router_load_rules_from_file(const char *path,
+                                                        claw_event_router_rule_t **out_rules,
+                                                        size_t *out_rule_count,
+                                                        cJSON **out_root);
+static esp_err_t claw_event_router_write_rules_json_file(const char *path, const char *json);
+static esp_err_t claw_event_router_commit_rules(cJSON *root,
+                                                claw_event_router_rule_t *new_rules,
+                                                size_t new_rule_count);
+
 static const char *claw_event_router_action_kind_to_string(claw_event_router_action_kind_t kind)
 {
     switch (kind) {
-    case CLAW_EVENT_ROUTER_ACTION_CALL_cap:
+    case CLAW_EVENT_ROUTER_ACTION_CALL_CAP:
         return "call_cap";
     case CLAW_EVENT_ROUTER_ACTION_RUN_AGENT:
         return "run_agent";
@@ -223,20 +194,35 @@ static esp_err_t claw_event_router_read_file(const char *path, char **out_buf)
     return ESP_OK;
 }
 
-static void claw_event_router_free_rules(claw_event_router_rule_t *rules, size_t rule_count)
+void claw_event_router_free_rule(claw_event_router_rule_t *rule)
+{
+    if (!rule) {
+        return;
+    }
+
+    free(rule->vars_json);
+    for (size_t i = 0; i < rule->action_count; i++) {
+        free(rule->actions[i].input_json);
+    }
+    free(rule->actions);
+    memset(rule, 0, sizeof(*rule));
+}
+
+void claw_event_router_free_rule_list(claw_event_router_rule_t *rules, size_t rule_count)
 {
     if (!rules) {
         return;
     }
 
     for (size_t i = 0; i < rule_count; i++) {
-        free(rules[i].vars_json);
-        for (size_t j = 0; j < rules[i].action_count; j++) {
-            free(rules[i].actions[j].input_json);
-        }
-        free(rules[i].actions);
+        claw_event_router_free_rule(&rules[i]);
     }
     free(rules);
+}
+
+static void claw_event_router_free_rules(claw_event_router_rule_t *rules, size_t rule_count)
+{
+    claw_event_router_free_rule_list(rules, rule_count);
 }
 
 static bool claw_event_router_parse_caller(const char *value, claw_cap_caller_t *out)
@@ -368,7 +354,7 @@ static esp_err_t claw_event_router_parse_action(const cJSON *item,
     }
 
     if (strcmp(type, "call_cap") == 0) {
-        out_action->kind = CLAW_EVENT_ROUTER_ACTION_CALL_cap;
+        out_action->kind = CLAW_EVENT_ROUTER_ACTION_CALL_CAP;
         if (!cap || !cap[0] || !input || !cJSON_IsObject(input)) {
             return ESP_ERR_INVALID_ARG;
         }
@@ -530,6 +516,308 @@ static esp_err_t claw_event_router_parse_rule(const cJSON *item,
         out_rule->action_count++;
     }
 
+    return ESP_OK;
+}
+
+static esp_err_t claw_event_router_parse_rule_json(const char *rule_json,
+                                                   claw_event_router_rule_t *out_rule)
+{
+    cJSON *item = NULL;
+    esp_err_t err;
+
+    if (!rule_json || !rule_json[0] || !out_rule) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    item = cJSON_Parse(rule_json);
+    if (!cJSON_IsObject(item)) {
+        cJSON_Delete(item);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    err = claw_event_router_parse_rule(item, out_rule);
+    cJSON_Delete(item);
+    return err;
+}
+
+static cJSON *claw_event_router_action_to_json(const claw_event_router_action_t *action)
+{
+    cJSON *item = NULL;
+    cJSON *input = NULL;
+
+    if (!action) {
+        return NULL;
+    }
+
+    item = cJSON_CreateObject();
+    if (!item) {
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(item, "type", claw_event_router_action_kind_to_string(action->kind));
+    if (action->caller != CLAW_CAP_CALLER_SYSTEM) {
+        cJSON_AddStringToObject(item, "caller",
+                                action->caller == CLAW_CAP_CALLER_AGENT ? "agent" : "console");
+    }
+    if (action->cap[0]) {
+        cJSON_AddStringToObject(item, "cap", action->cap);
+    }
+    if (!action->capture_output) {
+        cJSON_AddBoolToObject(item, "capture_output", false);
+    }
+    if (action->fail_open) {
+        cJSON_AddBoolToObject(item, "fail_open", true);
+    }
+
+    if (action->input_json && action->input_json[0]) {
+        input = cJSON_Parse(action->input_json);
+        if (!input) {
+            cJSON_Delete(item);
+            return NULL;
+        }
+    } else {
+        input = cJSON_CreateObject();
+        if (!input) {
+            cJSON_Delete(item);
+            return NULL;
+        }
+    }
+    cJSON_AddItemToObject(item, "input", input);
+    return item;
+}
+
+static cJSON *claw_event_router_rule_to_json(const claw_event_router_rule_t *rule)
+{
+    cJSON *item = NULL;
+    cJSON *match = NULL;
+    cJSON *actions = NULL;
+    cJSON *vars = NULL;
+
+    if (!rule) {
+        return NULL;
+    }
+
+    item = cJSON_CreateObject();
+    match = cJSON_CreateObject();
+    actions = cJSON_CreateArray();
+    if (!item || !match || !actions) {
+        cJSON_Delete(item);
+        cJSON_Delete(match);
+        cJSON_Delete(actions);
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(item, "id", rule->id);
+    if (rule->description[0]) {
+        cJSON_AddStringToObject(item, "description", rule->description);
+    }
+    if (!rule->enabled) {
+        cJSON_AddBoolToObject(item, "enabled", false);
+    }
+    if (!rule->consume_on_match) {
+        cJSON_AddBoolToObject(item, "consume_on_match", false);
+    }
+    if (rule->ack[0]) {
+        cJSON_AddStringToObject(item, "ack", rule->ack);
+    }
+    if (rule->vars_json && rule->vars_json[0]) {
+        vars = cJSON_Parse(rule->vars_json);
+        if (!cJSON_IsObject(vars)) {
+            cJSON_Delete(vars);
+            cJSON_Delete(item);
+            cJSON_Delete(match);
+            cJSON_Delete(actions);
+            return NULL;
+        }
+        cJSON_AddItemToObject(item, "vars", vars);
+    }
+
+    cJSON_AddStringToObject(match, "event_type", rule->match.event_type);
+    if (rule->match.event_key[0]) {
+        cJSON_AddStringToObject(match, "event_key", rule->match.event_key);
+    }
+    if (rule->match.source_cap[0]) {
+        cJSON_AddStringToObject(match, "source_cap", rule->match.source_cap);
+    }
+    if (rule->match.channel[0]) {
+        cJSON_AddStringToObject(match, "source_channel", rule->match.channel);
+    }
+    if (rule->match.chat_id[0]) {
+        cJSON_AddStringToObject(match, "chat_id", rule->match.chat_id);
+    }
+    if (rule->match.content_type[0]) {
+        cJSON_AddStringToObject(match, "content_type", rule->match.content_type);
+    }
+    if (rule->match.text[0]) {
+        cJSON_AddStringToObject(match, "text", rule->match.text);
+    }
+
+    for (size_t i = 0; i < rule->action_count; i++) {
+        cJSON *action = claw_event_router_action_to_json(&rule->actions[i]);
+        if (!action) {
+            cJSON_Delete(item);
+            cJSON_Delete(match);
+            cJSON_Delete(actions);
+            return NULL;
+        }
+        cJSON_AddItemToArray(actions, action);
+    }
+
+    cJSON_AddItemToObject(item, "match", match);
+    cJSON_AddItemToObject(item, "actions", actions);
+    return item;
+}
+
+static esp_err_t claw_event_router_load_rules_from_root(const cJSON *root,
+                                                        claw_event_router_rule_t **out_rules,
+                                                        size_t *out_rule_count)
+{
+    claw_event_router_rule_t *rules = NULL;
+    size_t rule_count = 0;
+
+    if (!out_rules || !out_rule_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_rules = NULL;
+    *out_rule_count = 0;
+
+    if (!cJSON_IsArray((cJSON *)root)) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    if ((size_t)cJSON_GetArraySize((cJSON *)root) > s_runtime.max_rules) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (cJSON_GetArraySize((cJSON *)root) > 0) {
+        rules = calloc((size_t)cJSON_GetArraySize((cJSON *)root), sizeof(*rules));
+        if (!rules) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, (cJSON *)root) {
+        esp_err_t err = claw_event_router_parse_rule(item, &rules[rule_count]);
+        if (err != ESP_OK) {
+            claw_event_router_free_rule_list(rules, (size_t)cJSON_GetArraySize((cJSON *)root));
+            return err;
+        }
+        rule_count++;
+    }
+
+    *out_rules = rules;
+    *out_rule_count = rule_count;
+    return ESP_OK;
+}
+
+static esp_err_t claw_event_router_load_rules_from_file(const char *path,
+                                                        claw_event_router_rule_t **out_rules,
+                                                        size_t *out_rule_count,
+                                                        cJSON **out_root)
+{
+    char *buf = NULL;
+    cJSON *root = NULL;
+    esp_err_t err;
+
+    if (!path || !out_rules || !out_rule_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (out_root) {
+        *out_root = NULL;
+    }
+
+    err = claw_event_router_read_file(path, &buf);
+    if (err == ESP_ERR_NOT_FOUND) {
+        root = cJSON_CreateArray();
+        if (!root) {
+            return ESP_ERR_NO_MEM;
+        }
+    } else if (err != ESP_OK) {
+        return err;
+    } else {
+        root = cJSON_Parse(buf);
+        free(buf);
+        if (!root) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
+    err = claw_event_router_load_rules_from_root(root, out_rules, out_rule_count);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        return err;
+    }
+
+    if (out_root) {
+        *out_root = root;
+    } else {
+        cJSON_Delete(root);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t claw_event_router_write_rules_json_file(const char *path, const char *json)
+{
+    char temp_path[224];
+    FILE *file = NULL;
+    size_t json_len = 0;
+
+    if (!path || !path[0] || !json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+    file = fopen(temp_path, "wb");
+    if (!file) {
+        return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    }
+
+    json_len = strlen(json);
+    if ((json_len > 0 && fwrite(json, 1, json_len, file) != json_len) || fflush(file) != 0) {
+        fclose(file);
+        remove(temp_path);
+        return ESP_FAIL;
+    }
+    fclose(file);
+
+    if (rename(temp_path, path) != 0) {
+        remove(temp_path);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t claw_event_router_commit_rules(cJSON *root,
+                                                claw_event_router_rule_t *new_rules,
+                                                size_t new_rule_count)
+{
+    char *json = NULL;
+    esp_err_t err;
+
+    if (!root) {
+        claw_event_router_free_rule_list(new_rules, new_rule_count);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    json = cJSON_Print(root);
+    if (!json) {
+        cJSON_Delete(root);
+        claw_event_router_free_rule_list(new_rules, new_rule_count);
+        return ESP_ERR_NO_MEM;
+    }
+
+    err = claw_event_router_write_rules_json_file(s_runtime.rules_path, json);
+    free(json);
+    cJSON_Delete(root);
+    if (err != ESP_OK) {
+        claw_event_router_free_rule_list(new_rules, new_rule_count);
+        return err;
+    }
+
+    claw_event_router_lock();
+    claw_event_router_free_rules(s_runtime.rules, s_runtime.rule_count);
+    s_runtime.rules = new_rules;
+    s_runtime.rule_count = new_rule_count;
+    claw_event_router_unlock();
     return ESP_OK;
 }
 
@@ -1299,7 +1587,7 @@ static esp_err_t claw_event_router_execute_script_action(
             sizeof(cap_name));
     cJSON_Delete(input_root);
     strlcpy(local.cap, cap_name, sizeof(local.cap));
-    local.kind = CLAW_EVENT_ROUTER_ACTION_CALL_cap;
+    local.kind = CLAW_EVENT_ROUTER_ACTION_CALL_CAP;
     return claw_event_router_execute_cap_action(rule, &local, event, ctx, result);
 }
 
@@ -1373,7 +1661,7 @@ static esp_err_t claw_event_router_execute_action(const claw_event_router_rule_t
              rule ? rule->id : "-",
              action ? claw_event_router_action_kind_to_string(action->kind) : "-");
     switch (action->kind) {
-    case CLAW_EVENT_ROUTER_ACTION_CALL_cap:
+    case CLAW_EVENT_ROUTER_ACTION_CALL_CAP:
         return claw_event_router_execute_cap_action(rule, action, event, ctx, result);
     case CLAW_EVENT_ROUTER_ACTION_RUN_AGENT:
         return claw_event_router_execute_agent_action(rule, action, event, ctx, result);
@@ -1728,8 +2016,6 @@ esp_err_t claw_event_router_stop(void)
 
 esp_err_t claw_event_router_reload(void)
 {
-    char *buf = NULL;
-    cJSON *root = NULL;
     claw_event_router_rule_t *new_rules = NULL;
     size_t new_rule_count = 0;
     esp_err_t err;
@@ -1738,50 +2024,13 @@ esp_err_t claw_event_router_reload(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    err = claw_event_router_read_file(s_runtime.rules_path, &buf);
-    if (err == ESP_ERR_NOT_FOUND) {
-        claw_event_router_lock();
-        claw_event_router_free_rules(s_runtime.rules, s_runtime.rule_count);
-        s_runtime.rules = NULL;
-        s_runtime.rule_count = 0;
-        claw_event_router_unlock();
-        ESP_LOGI(TAG, "Rules file not found, starting empty");
-        return ESP_OK;
-    }
+    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+                                                 &new_rules,
+                                                 &new_rule_count,
+                                                 NULL);
     if (err != ESP_OK) {
         return err;
     }
-
-    root = cJSON_Parse(buf);
-    free(buf);
-    if (!cJSON_IsArray(root)) {
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-    if ((size_t)cJSON_GetArraySize(root) > s_runtime.max_rules) {
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    if (cJSON_GetArraySize(root) > 0) {
-        new_rules = calloc((size_t)cJSON_GetArraySize(root), sizeof(*new_rules));
-        if (!new_rules) {
-            cJSON_Delete(root);
-            return ESP_ERR_NO_MEM;
-        }
-    }
-
-    cJSON *item = NULL;
-    cJSON_ArrayForEach(item, root) {
-        err = claw_event_router_parse_rule(item, &new_rules[new_rule_count]);
-        if (err != ESP_OK) {
-            claw_event_router_free_rules(new_rules, new_rule_count + 1);
-            cJSON_Delete(root);
-            return err;
-        }
-        new_rule_count++;
-    }
-    cJSON_Delete(root);
 
     claw_event_router_lock();
     claw_event_router_free_rules(s_runtime.rules, s_runtime.rule_count);
@@ -1908,9 +2157,226 @@ esp_err_t claw_event_router_handle_event(const claw_event_t *event,
     return claw_event_router_process_event(event, out_result);
 }
 
+esp_err_t claw_event_router_list_rules(claw_event_router_rule_t **out_rules,
+                                       size_t *out_rule_count)
+{
+    return claw_event_router_load_rules_from_file(s_runtime.rules_path,
+                                                  out_rules,
+                                                  out_rule_count,
+                                                  NULL);
+}
+
+esp_err_t claw_event_router_get_rule(const char *id, claw_event_router_rule_t *out_rule)
+{
+    claw_event_router_rule_t *rules = NULL;
+    size_t rule_count = 0;
+    esp_err_t err;
+
+    if (!id || !id[0] || !out_rule) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    err = claw_event_router_list_rules(&rules, &rule_count);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    for (size_t i = 0; i < rule_count; i++) {
+        if (strcmp(rules[i].id, id) == 0) {
+            *out_rule = rules[i];
+            memset(&rules[i], 0, sizeof(rules[i]));
+            claw_event_router_free_rule_list(rules, rule_count);
+            return ESP_OK;
+        }
+    }
+
+    claw_event_router_free_rule_list(rules, rule_count);
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t claw_event_router_add_rule(const claw_event_router_rule_t *rule)
+{
+    claw_event_router_rule_t *loaded_rules = NULL;
+    claw_event_router_rule_t *new_rules = NULL;
+    size_t old_rule_count = 0;
+    size_t new_rule_count = 0;
+    cJSON *root = NULL;
+    cJSON *rule_json = NULL;
+    esp_err_t err;
+
+    if (!s_runtime.initialized || !rule) {
+        return s_runtime.initialized ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    }
+
+    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+                                                 &loaded_rules,
+                                                 &old_rule_count,
+                                                 &root);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (old_rule_count >= s_runtime.max_rules) {
+        cJSON_Delete(root);
+        claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    for (size_t i = 0; i < old_rule_count; i++) {
+        if (strcmp(loaded_rules[i].id, rule->id) == 0) {
+            cJSON_Delete(root);
+            claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+
+    rule_json = claw_event_router_rule_to_json(rule);
+    if (!rule_json) {
+        cJSON_Delete(root);
+        claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+        return ESP_ERR_INVALID_ARG;
+    }
+    cJSON_AddItemToArray(root, rule_json);
+    claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+
+    err = claw_event_router_load_rules_from_root(root, &new_rules, &new_rule_count);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        return err;
+    }
+
+    return claw_event_router_commit_rules(root, new_rules, new_rule_count);
+}
+
+esp_err_t claw_event_router_update_rule(const claw_event_router_rule_t *rule)
+{
+    claw_event_router_rule_t *loaded_rules = NULL;
+    claw_event_router_rule_t *new_rules = NULL;
+    size_t old_rule_count = 0;
+    size_t new_rule_count = 0;
+    cJSON *root = NULL;
+    cJSON *rule_json = NULL;
+    cJSON *old_item = NULL;
+    esp_err_t err;
+    bool found = false;
+
+    if (!s_runtime.initialized || !rule) {
+        return s_runtime.initialized ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    }
+
+    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+                                                 &loaded_rules,
+                                                 &old_rule_count,
+                                                 &root);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    cJSON_ArrayForEach(old_item, root) {
+        const char *rule_id = cJSON_GetStringValue(cJSON_GetObjectItem(old_item, "id"));
+        if (rule_id && strcmp(rule_id, rule->id) == 0) {
+            rule_json = claw_event_router_rule_to_json(rule);
+            if (!rule_json) {
+                cJSON_Delete(root);
+                claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+                return ESP_ERR_INVALID_ARG;
+            }
+            cJSON_ReplaceItemViaPointer(root, old_item, rule_json);
+            found = true;
+            break;
+        }
+    }
+    claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+    if (!found) {
+        cJSON_Delete(root);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    err = claw_event_router_load_rules_from_root(root, &new_rules, &new_rule_count);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        return err;
+    }
+
+    return claw_event_router_commit_rules(root, new_rules, new_rule_count);
+}
+
+esp_err_t claw_event_router_delete_rule(const char *id)
+{
+    claw_event_router_rule_t *loaded_rules = NULL;
+    claw_event_router_rule_t *new_rules = NULL;
+    size_t old_rule_count = 0;
+    size_t new_rule_count = 0;
+    cJSON *root = NULL;
+    esp_err_t err;
+    bool found = false;
+
+    if (!s_runtime.initialized || !id || !id[0]) {
+        return s_runtime.initialized ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_STATE;
+    }
+
+    err = claw_event_router_load_rules_from_file(s_runtime.rules_path,
+                                                 &loaded_rules,
+                                                 &old_rule_count,
+                                                 &root);
+    if (err != ESP_OK) {
+        return err;
+    }
+    claw_event_router_free_rule_list(loaded_rules, old_rule_count);
+
+    for (int i = 0; i < cJSON_GetArraySize(root); i++) {
+        cJSON *item = cJSON_GetArrayItem(root, i);
+        const char *rule_id = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+
+        if (rule_id && strcmp(rule_id, id) == 0) {
+            cJSON_DeleteItemFromArray(root, i);
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        cJSON_Delete(root);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    err = claw_event_router_load_rules_from_root(root, &new_rules, &new_rule_count);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        return err;
+    }
+
+    return claw_event_router_commit_rules(root, new_rules, new_rule_count);
+}
+
+esp_err_t claw_event_router_add_rule_json(const char *rule_json)
+{
+    claw_event_router_rule_t rule = {0};
+    esp_err_t err = claw_event_router_parse_rule_json(rule_json, &rule);
+
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = claw_event_router_add_rule(&rule);
+    claw_event_router_free_rule(&rule);
+    return err;
+}
+
+esp_err_t claw_event_router_update_rule_json(const char *rule_json)
+{
+    claw_event_router_rule_t rule = {0};
+    esp_err_t err = claw_event_router_parse_rule_json(rule_json, &rule);
+
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = claw_event_router_update_rule(&rule);
+    claw_event_router_free_rule(&rule);
+    return err;
+}
+
 esp_err_t claw_event_router_list_rules_json(char *output, size_t output_size)
 {
     char *buf = NULL;
+    cJSON *root = NULL;
+    char *json = NULL;
     esp_err_t err;
 
     if (!output || output_size == 0) {
@@ -1926,15 +2392,25 @@ esp_err_t claw_event_router_list_rules_json(char *output, size_t output_size)
         return err;
     }
 
-    strlcpy(output, buf, output_size);
+    root = cJSON_Parse(buf);
     free(buf);
+    if (!cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    json = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (!json) {
+        return ESP_ERR_NO_MEM;
+    }
+    strlcpy(output, json, output_size);
+    free(json);
     return ESP_OK;
 }
 
 esp_err_t claw_event_router_get_rule_json(const char *id, char *output, size_t output_size)
 {
-    char *buf = NULL;
-    cJSON *root = NULL;
+    claw_event_router_rule_t rule = {0};
     cJSON *item = NULL;
     char *json = NULL;
     esp_err_t err;
@@ -1943,27 +2419,20 @@ esp_err_t claw_event_router_get_rule_json(const char *id, char *output, size_t o
         return ESP_ERR_INVALID_ARG;
     }
 
-    err = claw_event_router_read_file(s_runtime.rules_path, &buf);
+    err = claw_event_router_get_rule(id, &rule);
     if (err != ESP_OK) {
         return err;
     }
-    root = cJSON_Parse(buf);
-    free(buf);
-    if (!cJSON_IsArray(root)) {
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_RESPONSE;
-    }
 
-    cJSON_ArrayForEach(item, root) {
-        const char *rule_id = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
-        if (rule_id && strcmp(rule_id, id) == 0) {
-            json = cJSON_PrintUnformatted(item);
-            break;
-        }
+    item = claw_event_router_rule_to_json(&rule);
+    claw_event_router_free_rule(&rule);
+    if (!item) {
+        return ESP_ERR_INVALID_ARG;
     }
-    cJSON_Delete(root);
+    json = cJSON_PrintUnformatted(item);
+    cJSON_Delete(item);
     if (!json) {
-        return ESP_ERR_NOT_FOUND;
+        return ESP_ERR_NO_MEM;
     }
 
     strlcpy(output, json, output_size);

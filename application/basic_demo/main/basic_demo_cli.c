@@ -504,6 +504,63 @@ static int cmd_auto_last(int argc, char **argv)
     return 0;
 }
 
+static int cmd_auto_add_rule(int argc, char **argv)
+{
+    esp_err_t err;
+
+    if (argc != 2) {
+        printf("Usage: auto_add_rule <rule_json>\n");
+        return 1;
+    }
+
+    err = claw_event_router_add_rule_json(argv[1]);
+    if (err != ESP_OK) {
+        printf("auto_add_rule failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("automation rule added\n");
+    return 0;
+}
+
+static int cmd_auto_update_rule(int argc, char **argv)
+{
+    esp_err_t err;
+
+    if (argc != 2) {
+        printf("Usage: auto_update_rule <rule_json>\n");
+        return 1;
+    }
+
+    err = claw_event_router_update_rule_json(argv[1]);
+    if (err != ESP_OK) {
+        printf("auto_update_rule failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("automation rule updated\n");
+    return 0;
+}
+
+static int cmd_auto_delete_rule(int argc, char **argv)
+{
+    esp_err_t err;
+
+    if (argc != 2) {
+        printf("Usage: auto_delete_rule <id>\n");
+        return 1;
+    }
+
+    err = claw_event_router_delete_rule(argv[1]);
+    if (err != ESP_OK) {
+        printf("auto_delete_rule failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("automation rule deleted\n");
+    return 0;
+}
+
 static int cmd_auto_emit_message(int argc, char **argv)
 {
     char *text = NULL;
@@ -565,7 +622,7 @@ static int cmd_auto_emit_trigger(int argc, char **argv)
 static int cmd_auto(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: auto <reload|rules|rule|last|emit_message|emit_trigger> ...\n");
+        printf("Usage: auto <reload|rules|rule|add_rule|update_rule|delete_rule|last|emit_message|emit_trigger> ...\n");
         return 1;
     }
 
@@ -581,6 +638,15 @@ static int cmd_auto(int argc, char **argv)
     if (strcmp(argv[1], "last") == 0) {
         return cmd_auto_last(argc - 1, &argv[1]);
     }
+    if (strcmp(argv[1], "add_rule") == 0) {
+        return cmd_auto_add_rule(argc - 1, &argv[1]);
+    }
+    if (strcmp(argv[1], "update_rule") == 0) {
+        return cmd_auto_update_rule(argc - 1, &argv[1]);
+    }
+    if (strcmp(argv[1], "delete_rule") == 0) {
+        return cmd_auto_delete_rule(argc - 1, &argv[1]);
+    }
     if (strcmp(argv[1], "emit_message") == 0) {
         return cmd_auto_emit_message(argc - 1, &argv[1]);
     }
@@ -589,7 +655,7 @@ static int cmd_auto(int argc, char **argv)
     }
 
     printf("Unknown auto subcommand: %s\n", argv[1]);
-    printf("Usage: auto <reload|rules|rule|last|emit_message|emit_trigger> ...\n");
+    printf("Usage: auto <reload|rules|rule|add_rule|update_rule|delete_rule|last|emit_message|emit_trigger> ...\n");
     return 1;
 }
 
@@ -671,7 +737,7 @@ esp_err_t basic_demo_cli_start(void)
     {
         esp_console_cmd_t auto_cmd = {
             .command = "auto",
-            .help = "Automation operations: auto <reload|rules|rule|last|emit_message|emit_trigger> ...",
+            .help = "Automation operations: auto <reload|rules|rule|add_rule|update_rule|delete_rule|last|emit_message|emit_trigger> ...",
             .func = cmd_auto,
         };
         ESP_ERROR_CHECK(esp_console_cmd_register(&auto_cmd));

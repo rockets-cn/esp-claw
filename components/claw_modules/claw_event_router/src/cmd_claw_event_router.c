@@ -18,6 +18,9 @@ static struct {
     struct arg_lit *reload;
     struct arg_lit *rules;
     struct arg_str *rule;
+    struct arg_str *add_rule_json;
+    struct arg_str *update_rule_json;
+    struct arg_str *delete_rule;
     struct arg_lit *last;
     struct arg_lit *emit_message;
     struct arg_lit *emit_trigger;
@@ -45,6 +48,8 @@ static int event_router_func(int argc, char **argv)
     }
 
     operation_count = router_args.reload->count + router_args.rules->count + router_args.rule->count +
+                      router_args.add_rule_json->count + router_args.update_rule_json->count +
+                      router_args.delete_rule->count +
                       router_args.last->count + router_args.emit_message->count +
                       router_args.emit_trigger->count;
     if (operation_count != 1) {
@@ -82,6 +87,36 @@ static int event_router_func(int argc, char **argv)
 
         printf("%s\n", output);
         free(output);
+        return 0;
+    }
+
+    if (router_args.add_rule_json->count) {
+        err = claw_event_router_add_rule_json(router_args.add_rule_json->sval[0]);
+        if (err != ESP_OK) {
+            printf("event_router add-rule failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("automation rule added\n");
+        return 0;
+    }
+
+    if (router_args.update_rule_json->count) {
+        err = claw_event_router_update_rule_json(router_args.update_rule_json->sval[0]);
+        if (err != ESP_OK) {
+            printf("event_router update-rule failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("automation rule updated\n");
+        return 0;
+    }
+
+    if (router_args.delete_rule->count) {
+        err = claw_event_router_delete_rule(router_args.delete_rule->sval[0]);
+        if (err != ESP_OK) {
+            printf("event_router delete-rule failed: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("automation rule deleted\n");
         return 0;
     }
 
@@ -168,6 +203,9 @@ void register_claw_event_router(void)
     router_args.reload = arg_lit0(NULL, "reload", "Reload automation rules from disk");
     router_args.rules = arg_lit0(NULL, "rules", "List all automation rules");
     router_args.rule = arg_str0(NULL, "rule", "<id>", "Show one automation rule");
+    router_args.add_rule_json = arg_str0(NULL, "add-rule-json", "<json>", "Add one automation rule");
+    router_args.update_rule_json = arg_str0(NULL, "update-rule-json", "<json>", "Replace one automation rule by id");
+    router_args.delete_rule = arg_str0(NULL, "delete-rule", "<id>", "Delete one automation rule");
     router_args.last = arg_lit0(NULL, "last", "Show the last event router result");
     router_args.emit_message = arg_lit0(NULL, "emit-message", "Publish a message event");
     router_args.emit_trigger = arg_lit0(NULL, "emit-trigger", "Publish a trigger event");
@@ -178,7 +216,7 @@ void register_claw_event_router(void)
     router_args.event_type = arg_str0(NULL, "event-type", "<type>", "Trigger event type");
     router_args.event_key = arg_str0(NULL, "event-key", "<key>", "Trigger event key");
     router_args.payload_json = arg_str0(NULL, "payload-json", "<json>", "Trigger payload JSON object");
-    router_args.end = arg_end(12);
+    router_args.end = arg_end(15);
 
     const esp_console_cmd_t router_cmd = {
         .command = "event_router",
@@ -186,6 +224,9 @@ void register_claw_event_router(void)
         "Examples:\n"
         " event_router --rules\n"
         " event_router --rule sample-id\n"
+        " event_router --add-rule-json '{\"id\":\"sample\",\"match\":{\"event_type\":\"message\"},\"actions\":[{\"type\":\"drop\"}]}'\n"
+        " event_router --update-rule-json '{...}'\n"
+        " event_router --delete-rule sample-id\n"
         " event_router --reload\n"
         " event_router --emit-message --source-cap qq_gateway --channel qq --chat-id 123 --text hello\n",
         .func = event_router_func,
