@@ -36,6 +36,7 @@ static const char *TAG = "app_clawgent";
 static const char *const BASIC_DEMO_LLM_VISIBLE_GROUPS[] = {
     "cap_cli",
     "cap_files",
+    "cap_skill",
 };
 
 #define BASIC_DEMO_MEMORY_SESSION_ROOT   "/fatfs/data/sessions"

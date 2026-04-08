@@ -17,7 +17,6 @@
 #include "cmd_cap_im_tg.h"
 #include "cmd_cap_im_wechat.h"
 #include "cmd_cap_lua.h"
-#include "cmd_cap_skill.h"
 #include "cmd_cap_time.h"
 #include "cmd_cap_web_search.h"
 #include "cmd_claw_event_router.h"
@@ -695,7 +694,6 @@ esp_err_t basic_demo_cli_start(void)
     register_cap_llm_inspect();
     register_cap_mcp_client();
     register_cap_mcp_server();
-    register_cap_skill();
     register_cap_time();
     register_cap_web_search();
     register_claw_event_router();

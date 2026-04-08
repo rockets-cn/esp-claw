@@ -9,13 +9,13 @@
     {
       "id": "lua_write",
       "file": "lua_write.md",
-      "title": "Lua Script Authoring",
+      "title": "Describe how to correctly write Lua",
       "summary": "Describe how to write a Lua file, must be activate before edit a lua file."
     },
     {
       "id": "lua_run",
       "file": "lua_run.md",
-      "title": "Lua Script Execution",
+      "title": "Describe how to correctly run Lua",
       "summary": "Describe how to run a lua file, must be activate before running lua."
     },
     {
