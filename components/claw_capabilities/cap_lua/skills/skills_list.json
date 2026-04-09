@@ -4,7 +4,10 @@
       "id": "cap_lua_skills",
       "file": "cap_lua_skills.md",
       "title": "cap_lua_skills",
-      "summary": "This Files describes how to correctly use Lua scripts."
+      "summary": "This Files describes how to correctly use Lua scripts.",
+      "cap_groups": [
+        "cap_lua"
+      ]
     }
   ]
 }

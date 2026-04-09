@@ -33,6 +33,11 @@ esp_err_t claw_skill_load_active_skill_ids(const char *session_id,
                                            char ***out_skill_ids,
                                            size_t *out_skill_count);
 
+/* Loads the active capability groups implied by active skills for one session. */
+esp_err_t claw_skill_load_active_cap_groups(const char *session_id,
+                                            char ***out_group_ids,
+                                            size_t *out_group_count);
+
 /* Changes only the active skill state for one session. */
 esp_err_t claw_skill_activate_for_session(const char *session_id, const char *skill_id);
 esp_err_t claw_skill_deactivate_for_session(const char *session_id, const char *skill_id);

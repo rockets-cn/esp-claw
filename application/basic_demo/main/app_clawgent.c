@@ -53,22 +53,10 @@ static const char *const BASIC_DEMO_LLM_VISIBLE_GROUPS[] = {
     "You are the clawgent running on ESP32. " \
     "Answer briefly and plainly. " \
     "Treat Skills List as a catalog of optional skills, not as callable cap. " \
-    "Use 'activate_skill' to load a skill's documentation into the current session when needed.\n" \
-    "Skills are user-facing functions, while Capabilities are internal functions used by the model. " \
+    "Use 'activate_skill' to load a skill,and you will gain more callable capabilities\n" \
+    "Skills are user-facing functions, while Capabilities are internal functions used by the model.\n" \
+    "After completing the task, call 'deactivete_skill' to keep the context streamlined and efficient." \
     "When communicating with the user, refer to Skills instead of Capabilities." \
-    "\n" \
-    "/fatfs/data file tree:\n" \
-    "/fatfs/data/\n" \
-    "|-- automation/\n" \
-    "|   `-- automations.json\n" \
-    "|-- lua/\n" \
-    "|   `-- xxx.lua\n" \
-    "|-- memory/\n" \
-    "|   `-- MEMORY.md\n" \
-    "`-- skills/\n" \
-    "    |-- xxx.md\n" \
-    "    |-- skills_list.json\n" \
-    "    `-- weather.md\n" \
 
 esp_err_t basic_demo_cli_start(void);
 
@@ -111,89 +99,6 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings)
 
     ESP_RETURN_ON_ERROR(claw_cap_init(&cap_config), TAG, "Failed to init claw_cap");
 
-    ESP_RETURN_ON_ERROR(cap_cli_init(&(cap_cli_config_t) {
-        .max_commands = 16,
-        .max_output_bytes = 2048,
-    }),
-    TAG,
-    "Failed to init CLI cap");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "help",
-        .description = "List available console commands",
-        .usage_hint = "help [command]",
-    }),
-    TAG,
-    "Failed to whitelist help");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "cap",
-        .description = "Manage console cap commands",
-        .usage_hint = "cap list",
-    }),
-    TAG,
-    "Failed to whitelist cap");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "auto",
-        .description = "Manage automation console commands",
-        .usage_hint = "auto rules",
-    }),
-    TAG,
-    "Failed to whitelist auto");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "llm_inspect",
-        .description = "Inspect one local image with the LLM",
-        .usage_hint = "llm_inspect --path /fatfs/data/inbox/pic.jpg --prompt \"Describe this image\"",
-    }),
-    TAG,
-    "Failed to whitelist llm_inspect");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "mcp_client",
-        .description = "Run MCP discovery and remote tool calls",
-        .usage_hint = "mcp_client --discover",
-    }),
-    TAG,
-    "Failed to whitelist mcp_client");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "mcp_server",
-        .description = "Manage local MCP server lifecycle and config",
-        .usage_hint = "mcp_server --status",
-    }),
-    TAG,
-    "Failed to whitelist mcp_server");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "skill",
-        .description = "Manage active skills for one session",
-        .usage_hint = "skill --list --session default",
-    }),
-    TAG,
-    "Failed to whitelist skill");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "time",
-        .description = "Sync time or update timezone",
-        .usage_hint = "time --now",
-    }),
-    TAG,
-    "Failed to whitelist time");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "web_search",
-        .description = "Run web search with the configured provider",
-        .usage_hint = "web_search --query \"ESP-IDF mDNS example\"",
-    }),
-    TAG,
-    "Failed to whitelist web_search");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "event_router",
-        .description = "Manage and inspect event router operations",
-        .usage_hint = "event_router --rules",
-    }),
-    TAG,
-    "Failed to whitelist event_router");
-    ESP_RETURN_ON_ERROR(cap_cli_register_command(&(cap_cli_command_t) {
-        .command_name = "lua",
-        .description = "List, write, and run managed Lua scripts",
-        .usage_hint = "lua --run --path hello.lua",
-    }),
-    TAG,
-    "Failed to whitelist lua");
     ESP_RETURN_ON_ERROR(cap_time_set_timezone(settings->time_timezone),
                         TAG,
                         "Failed to set time cap timezone");
@@ -301,7 +206,6 @@ static esp_err_t init_capabilities(const basic_demo_settings_t *settings)
     ESP_RETURN_ON_ERROR(cap_mcp_server_register_group(),
                         TAG,
                         "Failed to register MCP server cap");
-    ESP_RETURN_ON_ERROR(cap_cli_register_group(), TAG, "Failed to register CLI cap");
     ESP_RETURN_ON_ERROR(cap_skill_register_group(),
                         TAG,
                         "Failed to register skill cap");

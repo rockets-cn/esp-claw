@@ -130,6 +130,9 @@ esp_err_t claw_cap_disable_group(const char *group_id);
 esp_err_t claw_cap_unregister_group(const char *group_id, uint32_t timeout_ms);
 esp_err_t claw_cap_unregister(const char *id_or_name, uint32_t timeout_ms);
 esp_err_t claw_cap_set_llm_visible_groups(const char *const *group_ids, size_t count);
+esp_err_t claw_cap_set_session_llm_visible_groups(const char *session_id,
+                                                  const char *const *group_ids,
+                                                  size_t count);
 bool claw_cap_group_exists(const char *group_id);
 esp_err_t claw_cap_get_group_state(const char *group_id, claw_cap_state_t *state);
 esp_err_t claw_cap_get_descriptor_state(const char *id_or_name,

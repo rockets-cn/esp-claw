@@ -28,6 +28,8 @@ typedef struct {
     char *file;
     char *title;
     char *summary;
+    char **cap_groups;
+    size_t cap_group_count;
 } claw_skill_registry_entry_t;
 
 typedef struct {
@@ -41,6 +43,9 @@ typedef struct {
 } claw_skill_state_t;
 
 static claw_skill_state_t s_skill = {0};
+
+static bool string_array_contains(const char *const *items, size_t count, const char *value);
+static esp_err_t push_unique_string(char ***items, size_t *count, const char *value);
 
 static void safe_copy(char *dst, size_t dst_size, const char *src)
 {
@@ -110,6 +115,7 @@ static void free_registry_entry(claw_skill_registry_entry_t *entry)
     free(entry->file);
     free(entry->title);
     free(entry->summary);
+    free_string_array(entry->cap_groups, entry->cap_group_count);
     memset(entry, 0, sizeof(*entry));
 }
 
@@ -336,6 +342,56 @@ static esp_err_t json_dup_required_string(cJSON *object, const char *key, char *
     return *out_value ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
+static esp_err_t json_dup_optional_unique_string_array(cJSON *object,
+                                                       const char *key,
+                                                       char ***out_items,
+                                                       size_t *out_count)
+{
+    cJSON *array = NULL;
+    char **items = NULL;
+    size_t count = 0;
+    int index;
+
+    if (!object || !key || !out_items || !out_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_items = NULL;
+    *out_count = 0;
+
+    array = cJSON_GetObjectItemCaseSensitive(object, key);
+    if (!array) {
+        return ESP_OK;
+    }
+    if (!cJSON_IsArray(array)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    for (index = 0; index < cJSON_GetArraySize(array); index++) {
+        cJSON *item = cJSON_GetArrayItem(array, index);
+        esp_err_t err;
+
+        if (!cJSON_IsString(item) || !item->valuestring || !item->valuestring[0]) {
+            free_string_array(items, count);
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (string_array_contains((const char *const *)items, count, item->valuestring)) {
+            free_string_array(items, count);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        err = push_unique_string(&items, &count, item->valuestring);
+        if (err != ESP_OK) {
+            free_string_array(items, count);
+            return err;
+        }
+    }
+
+    *out_items = items;
+    *out_count = count;
+    return ESP_OK;
+}
+
 static const claw_skill_registry_entry_t *claw_skill_find_entry(const char *skill_id)
 {
     size_t i;
@@ -398,12 +454,18 @@ static esp_err_t validate_registry_entry(claw_skill_registry_entry_t *entry)
 {
     char *path = NULL;
     FILE *file = NULL;
+    size_t i;
 
     if (!entry || !entry->id || !entry->file || !entry->title || !entry->summary) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!skill_path_is_valid(entry->file) || !is_markdown_skill_file(entry->file)) {
         return ESP_ERR_INVALID_ARG;
+    }
+    for (i = 0; i < entry->cap_group_count; i++) {
+        if (!entry->cap_groups[i] || !entry->cap_groups[i][0]) {
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     path = build_skill_path_dup(entry->file);
@@ -486,6 +548,12 @@ static esp_err_t load_registry_from_json(void)
         }
         if (err == ESP_OK) {
             err = json_dup_required_string(skill, "summary", &entry->summary);
+        }
+        if (err == ESP_OK) {
+            err = json_dup_optional_unique_string_array(skill,
+                                                        "cap_groups",
+                                                        &entry->cap_groups,
+                                                        &entry->cap_group_count);
         }
         if (err == ESP_OK) {
             err = validate_registry_entry(entry);
@@ -802,6 +870,58 @@ esp_err_t claw_skill_load_active_skill_ids(const char *session_id,
                                            size_t *out_skill_count)
 {
     return load_active_skill_ids_from_disk(session_id, out_skill_ids, out_skill_count);
+}
+
+esp_err_t claw_skill_load_active_cap_groups(const char *session_id,
+                                            char ***out_group_ids,
+                                            size_t *out_group_count)
+{
+    char **active_skill_ids = NULL;
+    size_t active_skill_count = 0;
+    char **group_ids = NULL;
+    size_t group_count = 0;
+    esp_err_t err;
+    size_t i;
+    size_t j;
+
+    if (!out_group_ids || !out_group_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_group_ids = NULL;
+    *out_group_count = 0;
+
+    err = load_active_skill_ids_from_disk(session_id, &active_skill_ids, &active_skill_count);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    for (i = 0; i < active_skill_count; i++) {
+        const claw_skill_registry_entry_t *entry = claw_skill_find_entry(active_skill_ids[i]);
+
+        if (!entry) {
+            continue;
+        }
+
+        for (j = 0; j < entry->cap_group_count; j++) {
+            err = push_unique_string(&group_ids, &group_count, entry->cap_groups[j]);
+            if (err != ESP_OK) {
+                free_string_array(active_skill_ids, active_skill_count);
+                free_string_array(group_ids, group_count);
+                return err;
+            }
+        }
+    }
+
+    free_string_array(active_skill_ids, active_skill_count);
+    if (group_count == 0) {
+        free_string_array(group_ids, group_count);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    *out_group_ids = group_ids;
+    *out_group_count = group_count;
+    return ESP_OK;
 }
 
 esp_err_t claw_skill_activate_for_session(const char *session_id, const char *skill_id)

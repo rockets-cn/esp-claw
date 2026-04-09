@@ -3,53 +3,63 @@
 Use this skill when the user wants to see existing Lua scripts, run one, or inspect async execution jobs.
 
 ## Command Rule
-- The LLM should run Lua through `cap_cli`, the command name is `lua`.
-- Operations are selected by flags such as `--list`, `--run`, `--run-async`, `--jobs`, and `--job`.
-- ESP-IDF console argument parsing only recognizes double quotes. Do not wrap JSON in single quotes.
+- The LLM should call Lua through the direct capability execute entrypoints, not through `cap_cli`.
+- Use `lua_list_scripts` to inspect scripts.
+- Use `lua_run_script` for synchronous execution.
+- Use `lua_run_script_async` for long-running or continuous scripts.
+- Use `lua_list_async_jobs` and `lua_get_async_job` to inspect async jobs.
 
 ## Running a Script Synchronously
-Use `cap_cli` when the user wants immediate output.
-- Required: `--run --path <path>`
-- Optional: `--args-json "<json>"`, `--timeout-ms <ms>`
+Use `lua_run_script` when the user wants immediate output.
+- Required: `path`
+- Optional: `args`, `timeout_ms`
 - Prefer relative paths such as `hello.lua`
 
 Examples:
-```text
-lua --run --path hello.lua
-lua --run --path hello.lua --args-json "{\"pin\":2}" --timeout-ms 3000
-```
-
-Example `cap_cli` input:
 ```json
 {
-  "command_line": "lua --run --path blink.lua --args-json \"{\\\"pin\\\":2}\" --timeout-ms 3000"
+  "path": "hello.lua"
 }
 ```
 
-If the script expects structured inputs, pass them through `--args-json`. The runtime exposes them to Lua as the global `args`.
-
-## Running a Script Asynchronously
-Use `cap_cli` with `lua --run-async` for long-running or continuous scripts.
-- Required: `--run-async --path <path>`
-- Optional: `--args-json "<json>"`, `--timeout-ms <ms>`
-
-Examples:
-```text
-lua --run-async --path blink.lua
-lua --run-async --path blink.lua --args-json "{\"pin\":2}" --timeout-ms 3000
-```
-
-Example `cap_cli` input:
 ```json
 {
-  "command_line": "lua --run-async --path blink.lua --args-json \"{\\\"pin\\\":2}\" --timeout-ms 3000"
+  "path": "blink.lua",
+  "args": {
+    "pin": 2
+  },
+  "timeout_ms": 3000
+}
+```
+
+If the script expects structured inputs, pass them through `args`. The runtime exposes them to Lua as the global `args`.
+
+## Running a Script Asynchronously
+Use `lua_run_script_async` for long-running or continuous scripts.
+- Required: `path`
+- Optional: `args`, `timeout_ms`
+
+Examples:
+```json
+{
+  "path": "blink.lua"
+}
+```
+
+```json
+{
+  "path": "blink.lua",
+  "args": {
+    "pin": 2
+  },
+  "timeout_ms": 3000
 }
 ```
 
 After starting an async script:
-- Use `cap_cli` with `lua --jobs`
-- Use `cap_cli` with `lua --jobs --status running`
-- Use `cap_cli` with `lua --job <job_id>`
+- Use `lua_list_async_jobs`
+- Use `lua_list_async_jobs` with `{"status":"running"}`
+- Use `lua_get_async_job` with `{"job_id":"<job_id>"}`
 
 ## Execution Notes
 - Paths must resolve under `/spiffs/lua` and end with `.lua`.

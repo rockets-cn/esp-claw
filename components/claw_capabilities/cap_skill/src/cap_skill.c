@@ -40,6 +40,31 @@ static void cap_skill_free_string_array(char **items, size_t count)
     free(items);
 }
 
+static esp_err_t cap_skill_sync_session_visible_groups(const char *session_id)
+{
+    char **group_ids = NULL;
+    size_t group_count = 0;
+    esp_err_t err;
+
+    if (!session_id || !session_id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    err = claw_skill_load_active_cap_groups(session_id, &group_ids, &group_count);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return claw_cap_set_session_llm_visible_groups(session_id, NULL, 0);
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = claw_cap_set_session_llm_visible_groups(session_id,
+                                                  (const char *const *)group_ids,
+                                                  group_count);
+    cap_skill_free_string_array(group_ids, group_count);
+    return err;
+}
+
 static esp_err_t cap_skill_build_result(const char *action,
                                         const char *session_id,
                                         const char *skill_id,
@@ -415,6 +440,14 @@ static esp_err_t cap_skill_activate_execute(const char *input_json,
                  skill_id_buf);
         return err;
     }
+    err = cap_skill_sync_session_visible_groups(ctx->session_id);
+    if (err != ESP_OK) {
+        snprintf(output,
+                 output_size,
+                 "{\"ok\":false,\"error\":\"failed to sync capability visibility\",\"skill_id\":\"%s\"}",
+                 skill_id_buf);
+        return err;
+    }
 
     return cap_skill_build_result(CAP_SKILL_ACTIVATE,
                                   ctx->session_id,
@@ -456,6 +489,14 @@ static esp_err_t cap_skill_deactivate_execute(const char *input_json,
         snprintf(output,
                  output_size,
                  "{\"ok\":false,\"error\":\"failed to deactivate skill\",\"skill_id\":\"%s\"}",
+                 skill_id_buf);
+        return err;
+    }
+    err = cap_skill_sync_session_visible_groups(ctx->session_id);
+    if (err != ESP_OK) {
+        snprintf(output,
+                 output_size,
+                 "{\"ok\":false,\"error\":\"failed to sync capability visibility\",\"skill_id\":\"%s\"}",
                  skill_id_buf);
         return err;
     }
