@@ -66,7 +66,7 @@ static esp_err_t init_memory(void)
         .session_root_dir = BASIC_DEMO_MEMORY_SESSION_ROOT,
         .long_term_memory_path = BASIC_DEMO_MEMORY_LONG_TERM_PATH,
         .max_session_messages = 20,
-        .max_message_chars = 256,
+        .max_message_chars = 1024,
     };
     esp_err_t err;
 

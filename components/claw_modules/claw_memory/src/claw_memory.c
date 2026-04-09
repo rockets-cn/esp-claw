@@ -24,7 +24,7 @@ static const char *DEFAULT_LONG_TERM_MEMORY =
     "(empty - Clawgent will write memories here as it learns)\n";
 
 #define CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES 20
-#define CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS    256
+#define CLAW_MEMORY_DEFAULT_MAX_MESSAGE_CHARS    1024
 
 typedef struct {
     int initialized;

@@ -914,19 +914,18 @@ static cJSON *claw_event_router_build_event_context(const claw_event_t *event)
     return ctx;
 }
 
-static bool claw_event_router_lookup_string(const cJSON *ctx,
-                                            const char *path,
-                                            char *buf,
-                                            size_t buf_size)
+static char *claw_event_router_lookup_string_dup(const cJSON *ctx,
+                                                 const char *path)
 {
     char path_buf[128];
     const cJSON *node = ctx;
     char *segment = NULL;
+    char num_buf[32];
+    const char *value = NULL;
 
-    if (!ctx || !path || !path[0] || !buf || buf_size == 0) {
-        return false;
+    if (!ctx || !path || !path[0]) {
+        return NULL;
     }
-    buf[0] = '\0';
     strlcpy(path_buf, path, sizeof(path_buf));
     segment = path_buf;
     while (segment && segment[0]) {
@@ -935,11 +934,11 @@ static bool claw_event_router_lookup_string(const cJSON *ctx,
             *dot = '\0';
         }
         if (!cJSON_IsObject(node)) {
-            return false;
+            return NULL;
         }
         node = cJSON_GetObjectItemCaseSensitive((cJSON *)node, segment);
         if (!node) {
-            return false;
+            return NULL;
         }
         if (!dot) {
             break;
@@ -948,22 +947,19 @@ static bool claw_event_router_lookup_string(const cJSON *ctx,
     }
 
     if (cJSON_IsString(node) && node->valuestring) {
-        strlcpy(buf, node->valuestring, buf_size);
-        return true;
+        value = node->valuestring;
+    } else if (cJSON_IsNumber(node)) {
+        snprintf(num_buf, sizeof(num_buf), "%g", node->valuedouble);
+        value = num_buf;
+    } else if (cJSON_IsBool(node)) {
+        value = cJSON_IsTrue(node) ? "true" : "false";
+    } else if (cJSON_IsNull(node)) {
+        value = "null";
+    } else {
+        return NULL;
     }
-    if (cJSON_IsNumber(node)) {
-        snprintf(buf, buf_size, "%g", node->valuedouble);
-        return true;
-    }
-    if (cJSON_IsBool(node)) {
-        strlcpy(buf, cJSON_IsTrue(node) ? "true" : "false", buf_size);
-        return true;
-    }
-    if (cJSON_IsNull(node)) {
-        strlcpy(buf, "null", buf_size);
-        return true;
-    }
-    return false;
+
+    return strdup(value);
 }
 
 static char *claw_event_router_render_string(const char *template_str, const cJSON *ctx)
@@ -989,7 +985,7 @@ static char *claw_event_router_render_string(const char *template_str, const cJS
             size_t start = i + 2;
             size_t end = start;
             char key[96];
-            char value[256];
+            char *value = NULL;
             size_t key_len;
             size_t value_len;
 
@@ -1009,12 +1005,19 @@ static char *claw_event_router_render_string(const char *template_str, const cJS
             key[key_len] = '\0';
             claw_event_router_trim_copy(key, sizeof(key), key);
 
-            value[0] = '\0';
-            claw_event_router_lookup_string(ctx, key, value, sizeof(value));
+            value = claw_event_router_lookup_string_dup(ctx, key);
+            if (!value) {
+                value = strdup("");
+            }
+            if (!value) {
+                free(out);
+                return NULL;
+            }
             value_len = strlen(value);
             if (out_len + value_len + 1 > out_cap) {
                 char *grown = realloc(out, out_len + value_len + 32);
                 if (!grown) {
+                    free(value);
                     free(out);
                     return NULL;
                 }
@@ -1022,6 +1025,7 @@ static char *claw_event_router_render_string(const char *template_str, const cJS
                 out_cap = out_len + value_len + 32;
             }
             memcpy(out + out_len, value, value_len);
+            free(value);
             out_len += value_len;
             out[out_len] = '\0';
             i = end + 2;
