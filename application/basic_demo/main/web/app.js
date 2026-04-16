@@ -604,21 +604,28 @@ function stopWechatLoginPolling() {
 }
 
 function renderWechatLoginStatus(data) {
-  const qrImage = document.getElementById("wechatLoginQr");
+  const qrCanvas = document.getElementById("wechatLoginQr");
   const qrLink = document.getElementById("wechatLoginQrLink");
   const meta = document.getElementById("wechatLoginMeta");
 
   if (data.qr_data_url) {
-    qrImage.src =
-      "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" +
-      encodeURIComponent(data.qr_data_url);
-    qrImage.classList.remove("hidden");
+    if (typeof window.renderWechatQr === "function") {
+      try {
+        window.renderWechatQr(qrCanvas, data.qr_data_url);
+      } catch (error) {
+        console.error("Failed to render WeChat QR:", error);
+      }
+    }
+    qrCanvas.classList.remove("hidden");
     qrLink.href = data.qr_data_url;
     qrLink.textContent = t("wechatLoginOpenLink");
     qrLink.classList.remove("hidden");
   } else {
-    qrImage.removeAttribute("src");
-    qrImage.classList.add("hidden");
+    const ctx = qrCanvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+    }
+    qrCanvas.classList.add("hidden");
     qrLink.removeAttribute("href");
     qrLink.textContent = "";
     qrLink.classList.add("hidden");

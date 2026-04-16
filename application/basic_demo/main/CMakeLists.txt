@@ -7,6 +7,7 @@ idf_component_register(
         "web/index.html"
         "web/styles.css"
         "web/app.js"
+        "web/lean-qr.min.mjs"
 )
 
 if(CONFIG_BASIC_DEMO_ENABLE_EMOTE)

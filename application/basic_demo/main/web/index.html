@@ -6,6 +6,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title data-i18n-title="docTitle">ESP-Claw Settings</title>
   <link rel="stylesheet" href="/styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "lean-qr": "/lean-qr.min.mjs"
+      }
+    }
+  </script>
+  <script type="module">
+    import { generate } from "lean-qr";
+
+    window.renderWechatQr = (canvas, content) => {
+      if (!canvas || !content) {
+        return;
+      }
+      const code = generate(content);
+      code.toCanvas(canvas);
+    };
+  </script>
 </head>
 
 <body>
@@ -156,7 +174,7 @@
                     </div>
                     <div id="wechatLoginBanner" class="banner"></div>
                     <p id="wechatLoginMeta" class="section-note" data-i18n="wechatLoginStatus">Status: idle</p>
-                    <img id="wechatLoginQr" class="wechat-qr hidden" alt="WeChat QR code">
+                    <canvas id="wechatLoginQr" class="wechat-qr hidden" aria-label="WeChat QR code"></canvas>
                     <p><a id="wechatLoginQrLink" class="wechat-login-link hidden" target="_blank" rel="noopener noreferrer" data-i18n="wechatLoginOpenLink">Open login link</a></p>
                     <div class="form-grid" style="margin-top: 0.85rem;">
                       <div class="form-group">

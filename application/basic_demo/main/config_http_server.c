@@ -34,6 +34,8 @@ extern const uint8_t styles_css_start[] asm("_binary_styles_css_start");
 extern const uint8_t styles_css_end[] asm("_binary_styles_css_end");
 extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
+extern const uint8_t lean_qr_min_mjs_start[] asm("_binary_lean_qr_min_mjs_start");
+extern const uint8_t lean_qr_min_mjs_end[] asm("_binary_lean_qr_min_mjs_end");
 
 typedef struct {
     httpd_handle_t server;
@@ -267,6 +269,14 @@ static esp_err_t styles_handler(httpd_req_t *req)
 static esp_err_t app_js_handler(httpd_req_t *req)
 {
     return send_embedded_file(req, app_js_start, app_js_end, "application/javascript; charset=utf-8");
+}
+
+static esp_err_t lean_qr_handler(httpd_req_t *req)
+{
+    return send_embedded_file(req,
+                              lean_qr_min_mjs_start,
+                              lean_qr_min_mjs_end,
+                              "application/javascript; charset=utf-8");
 }
 
 static esp_err_t status_handler(httpd_req_t *req)
@@ -804,6 +814,7 @@ esp_err_t config_http_server_start(void)
         { .uri = "/index.html", .method = HTTP_GET, .handler = index_handler },
         { .uri = "/styles.css", .method = HTTP_GET, .handler = styles_handler },
         { .uri = "/app.js", .method = HTTP_GET, .handler = app_js_handler },
+        { .uri = "/lean-qr.min.mjs", .method = HTTP_GET, .handler = lean_qr_handler },
         { .uri = "/api/status", .method = HTTP_GET, .handler = status_handler },
         { .uri = "/api/config", .method = HTTP_GET, .handler = config_get_handler },
         { .uri = "/api/config", .method = HTTP_POST, .handler = config_post_handler },
