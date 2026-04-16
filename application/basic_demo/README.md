@@ -7,7 +7,7 @@ The main entry point is `application/basic_demo/main/main.c`.
 After the device boots, the overall flow is:
 
 1. Initialize NVS and load device settings
-2. Mount FATFS at `/fatfs/data`
+2. Mount FATFS at `/fatfs`
 3. Initialize Wi-Fi and the local HTTP configuration service
 4. Enter `app_claw_start()`
 5. Initialize the event router, memory, skills, and capabilities
@@ -16,12 +16,12 @@ After the device boots, the overall flow is:
 
 The current runtime depends on the following local directories:
 
-- `/fatfs/data/sessions`: session history
-- `/fatfs/data/memory/MEMORY.md`: long-term memory
-- `/fatfs/data/skills`: skill documents and manifest
-- `/fatfs/data/lua`: Lua scripts
-- `/fatfs/data/automation/automations.json`: automation rules
-- `/fatfs/data/inbox`: message attachment storage
+- `/fatfs/sessions`: session history
+- `/fatfs/memory/MEMORY.md`: long-term memory
+- `/fatfs/skills`: skill documents and manifest
+- `/fatfs/scripts`: Lua scripts
+- `/fatfs/router_rules/router_rules.json`: automation rules
+- `/fatfs/inbox`: message attachment storage
 
 The current `basic_demo` integrates the following capabilities:
 
@@ -31,7 +31,7 @@ The current `basic_demo` integrates the following capabilities:
 - `cap_lua`
 - `cap_mcp_client`
 - `cap_mcp_server`
-- `cap_skill`
+- `cap_skill_mgr`
 - `cap_time`
 - `cap_llm_inspect`
 - `cap_web_search`
@@ -58,6 +58,8 @@ cd application/basic_demo
 idf.py gen-bmgr-config -c ./boards -b esp32_S3_DevKitC_1
 ```
 
+> `idf.py gen-bmgr-config -c ./boards -b <board_name>` generates the configuration for the specified board. Available board names can be found in the `boards` directory.
+
 2. Configure Wi-Fi, LLM, IM, search engine, and related parameters:
 
 The key demo settings include:
@@ -68,6 +70,11 @@ The key demo settings include:
 - Telegram Bot Token
 - Brave / Tavily Search Key
 - Timezone
+
+Key Notes:
+
+- IM bot token: available from Telegram [@BotFather](https://t.me/BotFather) or [QQ Bot](https://q.qq.com/qqbot/openclaw/login.html)
+- LLM API key: available from [Anthropic Console](https://console.anthropic.com), [OpenAI Platform](https://platform.openai.com), or [Alibaba Cloud Bailian](https://bailian.console.aliyun.com/#/api-key)
 
 You can adjust compile-time default values through `menuconfig`:
 
@@ -81,10 +88,3 @@ idf.py menuconfig
 idf.py build
 idf.py flash monitor
 ```
-
-> `idf.py gen-bmgr-config -c ./boards -b <board_name>` generates the configuration for the specified board. Available board names can be found in the `boards` directory.
-
-### Key Notes
-
-- IM bot token: available from Telegram [@BotFather](https://t.me/BotFather) or [QQ Bot](https://q.qq.com/qqbot/openclaw/login.html)
-- LLM API key: available from [Anthropic Console](https://console.anthropic.com), [OpenAI Platform](https://platform.openai.com), or [Alibaba Cloud Bailian](https://bailian.console.aliyun.com/#/api-key)
