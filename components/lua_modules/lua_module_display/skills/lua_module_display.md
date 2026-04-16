@@ -38,6 +38,9 @@ pcall(display.deinit)
 ## Important rules
 
 - All coordinates and sizes are integer arguments unless noted otherwise.
+- Most numeric drawing arguments are validated as integers in the Lua binding.
+- Passing floating-point values such as `10.5`, `32.2`, or `tilt / 2` to coordinates, widths, heights, radii, crop rectangles, flush rectangles, or `font_size` can raise a Lua error instead of being rounded automatically.
+- If a computed value is meant to be a pixel coordinate or size, convert it to an integer first before passing it to the display API. Prefer integer division `//` when the value comes from a division expression.
 - Colors are almost always passed as three integers: `r, g, b`.
 - Text drawing only supports ASCII text.
 - For Chinese or other Unicode text, render an image and draw it with `draw_png_file(...)` or `draw_jpeg_file(...)`.
@@ -141,7 +144,7 @@ Draws ASCII text at the given position.
 
 `options` is an optional table:
 - `r`, `g`, `b`: text color, default white
-- `font_size`: integer, default `24`
+- `font_size`: integer, default `24`; floating-point values are rejected
 - `bg_r`, `bg_g`, `bg_b`: optional background color; if any background field is given, background fill is enabled
 
 Example:
@@ -164,7 +167,7 @@ Restrictions:
 Measures text without drawing it.
 
 `options` currently supports:
-- `font_size`
+- `font_size` as an integer
 
 Returns:
 - `width`
@@ -182,7 +185,7 @@ Draws ASCII text inside a rectangle with alignment.
 
 `options` supports:
 - `r`, `g`, `b`
-- `font_size`
+- `font_size` as an integer
 - `bg_r`, `bg_g`, `bg_b`
 - `align`: `"left"`, `"center"`/`"centre"`, or `"right"`
 - `valign`: `"top"`, `"middle"`/`"center"`, or `"bottom"`
