@@ -493,11 +493,8 @@ static void publish_stage_tool_calls(const claw_core_request_t *request,
         return;
     }
 
-    if (iteration > 0) {
-        written = snprintf(buf, sizeof(buf), "🦞 [Round %" PRIu32 "] Snap: ", iteration + 1);
-    } else {
-        written = snprintf(buf, sizeof(buf), "🦞 Snap: ");
-    }
+    written = snprintf(buf, sizeof(buf), "🦞 [Round %" PRIu32 "] Snap: ", iteration + 1);
+
     if (written < 0 || (size_t)written >= sizeof(buf)) {
         return;
     }
