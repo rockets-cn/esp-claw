@@ -388,7 +388,7 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
     core_config.max_tool_iterations = 20;
     core_config.request_queue_len = 4;
     core_config.response_queue_len = 4;
-    core_config.max_context_providers = 6;
+    core_config.max_context_providers = 8;
 
     if (!llm_enabled) {
         ESP_LOGW(TAG, "LLM is not fully configured. Provider=%s profile=%s model=%s. "
@@ -411,6 +411,9 @@ ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_memory_session_history_
 ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_skill_skills_list_provider), TAG, "Failed to add skills list provider");
 ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_skill_active_skill_docs_provider), TAG, "Failed to add active skill docs provider");
 ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&claw_cap_tools_provider), TAG, "Failed to add cap tools provider");
+ESP_RETURN_ON_ERROR(claw_core_add_context_provider(&cap_lua_async_jobs_provider), TAG, "Failed to add Lua async jobs provider");
+        ESP_RETURN_ON_ERROR(claw_core_add_completion_observer(cap_lua_honesty_observe_completion, NULL),
+                            TAG, "Failed to install Lua honesty observer");
 
         ESP_RETURN_ON_ERROR(claw_core_start(), TAG, "Failed to start claw_core");
     }

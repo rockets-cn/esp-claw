@@ -5,6 +5,7 @@
  */
 #include "llm/claw_llm_http_transport.h"
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,10 +14,38 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "llm_http";
 
 #define CLAW_LLM_HTTP_RB_INITIAL_CAP 4096
+
+static volatile bool *s_abort_flag = NULL;
+static TaskHandle_t   s_abort_owner = NULL;
+
+void claw_llm_http_arm_abort(volatile bool *flag)
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    assert(s_abort_flag == NULL || s_abort_owner == self);
+    s_abort_flag = flag;
+    s_abort_owner = self;
+}
+
+void claw_llm_http_disarm_abort(void)
+{
+    if (s_abort_owner == xTaskGetCurrentTaskHandle()) {
+        s_abort_flag = NULL;
+        s_abort_owner = NULL;
+    }
+}
+
+static inline bool abort_requested(void)
+{
+    return s_abort_flag &&
+           s_abort_owner == xTaskGetCurrentTaskHandle() &&
+           *s_abort_flag;
+}
 
 typedef struct {
     char *data;
@@ -109,6 +138,10 @@ static void response_buffer_free(response_buffer_t *buffer)
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     response_buffer_t *buffer = (response_buffer_t *)evt->user_data;
+
+    if (abort_requested()) {
+        return ESP_FAIL;
+    }
 
     if (evt->event_id == HTTP_EVENT_ON_DATA) {
         return response_buffer_append(buffer, (const char *)evt->data, evt->data_len);
@@ -246,8 +279,14 @@ esp_err_t claw_llm_http_post_json(const claw_llm_http_json_request_t *request,
     ESP_LOGD(TAG, "POST %s", request->url);
     err = esp_http_client_perform(client);
     if (err != ESP_OK) {
-        *out_error_message = dup_printf("HTTP request failed: %s", esp_err_to_name(err));
-        ESP_LOGE(TAG, "HTTP perform failed: %s", esp_err_to_name(err));
+        if (abort_requested()) {
+            *out_error_message = dup_printf("HTTP request aborted by caller");
+            ESP_LOGW(TAG, "HTTP perform aborted: %s", esp_err_to_name(err));
+            err = ESP_ERR_INVALID_STATE;
+        } else {
+            *out_error_message = dup_printf("HTTP request failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "HTTP perform failed: %s", esp_err_to_name(err));
+        }
         goto cleanup;
     }
 

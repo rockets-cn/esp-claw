@@ -79,9 +79,9 @@ const strings = {
 
     sectionAdvanced: "Advanced Settings",
     timezone: "Timezone",
-    timezonePlaceholder: "e.g. UTC0",
-    luaBaseDir: "Lua Base Directory",
-
+    timezonePlaceholder: "e.g. CST-8 (Beijing) or UTC0",
+    timezoneHelp:
+      "POSIX TZ string only. The sign is INVERTED relative to common UTC notation: Beijing (UTC+8) must be written as 'CST-8'; New York (UTC-5) is 'EST5'. Names like 'Asia/Shanghai' will NOT work — please convert manually.",
     saveBtn: "Save Changes",
     saveSuccess: "Settings saved",
     saveError: "Failed to save settings",
@@ -210,9 +210,9 @@ const strings = {
 
     sectionAdvanced: "高级设置",
     timezone: "时区",
-    timezonePlaceholder: "例如 UTC0",
-    luaBaseDir: "Lua 基本目录",
-
+    timezonePlaceholder: "例如 CST-8（北京时间）或 UTC0",
+    timezoneHelp:
+      "仅接受 POSIX TZ 字符串，符号与日常 UTC 表示相反。北京时间（UTC+8）应写作 “CST-8”，纽约（UTC-5）写作 “EST5”。不支持 “Asia/Shanghai” 这种 IANA 名称，请自行换算。",
     saveBtn: "保存更改",
     saveSuccess: "设置已保存",
     saveError: "保存设置失败",
@@ -405,7 +405,6 @@ const configFields = [
   "wechat_account_id",
   "search_brave_key",
   "search_tavily_key",
-  "lua_base_dir",
   "time_timezone",
 ];
 

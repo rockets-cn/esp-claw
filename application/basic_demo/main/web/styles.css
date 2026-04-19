@@ -464,6 +464,13 @@ main {
   grid-column: 1 / -1;
 }
 
+.form-hint {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  opacity: 0.85;
+}
+
 label {
   font-size: 0.8rem;
   color: var(--text-secondary);

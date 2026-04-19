@@ -22,6 +22,8 @@ static const char *TAG = "claw_cap";
 #define CLAW_CAP_DEFAULT_MAX_GROUPS       4
 #define CLAW_CAP_UNLOAD_POLL_MS          20
 
+#define CLAW_CAP_TOOL_DESCRIPTION_MAX 256
+
 typedef struct {
     bool occupied;
     const claw_cap_group_t *group;
@@ -205,6 +207,35 @@ static const claw_cap_session_visibility_t *claw_cap_get_session_visibility_lock
     return &s_runtime.session_visibilities[index];
 }
 
+static void claw_cap_add_capped_description(cJSON *obj, const char *desc, const char *cap_name)
+{
+    const char *src = desc ? desc : "";
+    size_t len = strlen(src);
+
+    if (len <= CLAW_CAP_TOOL_DESCRIPTION_MAX) {
+        cJSON_AddStringToObject(obj, "description", src);
+        return;
+    }
+
+    ESP_LOGW(TAG, "cap '%s' description %u bytes exceeds %u, truncating",
+             cap_name ? cap_name : "?", (unsigned)len,
+             (unsigned)CLAW_CAP_TOOL_DESCRIPTION_MAX);
+
+    char buf[CLAW_CAP_TOOL_DESCRIPTION_MAX + 1];
+    memcpy(buf, src, CLAW_CAP_TOOL_DESCRIPTION_MAX);
+    buf[CLAW_CAP_TOOL_DESCRIPTION_MAX] = '\0';
+
+    /* Trim a half-cut UTF-8 codepoint at the end so cJSON never emits invalid bytes. */
+    size_t out = CLAW_CAP_TOOL_DESCRIPTION_MAX;
+    while (out > 0 && ((unsigned char)buf[out - 1] & 0xC0) == 0x80) {
+        buf[--out] = '\0';
+    }
+    if (out > 0 && ((unsigned char)buf[out - 1] & 0xC0) == 0xC0) {
+        buf[--out] = '\0';
+    }
+    cJSON_AddStringToObject(obj, "description", buf);
+}
+
 char *claw_cap_build_llm_tools_json(const claw_cap_call_context_t *ctx,
                                     bool wrap_for_responses_api)
 {
@@ -242,8 +273,7 @@ char *claw_cap_build_llm_tools_json(const claw_cap_call_context_t *ctx,
         }
 
         cJSON_AddStringToObject(item, "name", slot->descriptor.name);
-        cJSON_AddStringToObject(item, "description",
-                                slot->descriptor.description ? slot->descriptor.description : "");
+        claw_cap_add_capped_description(item, slot->descriptor.description, slot->descriptor.name);
         schema = cJSON_Parse(slot->descriptor.input_schema_json ?
                              slot->descriptor.input_schema_json : "{\"type\":\"object\",\"properties\":{}}");
         if (!schema) {

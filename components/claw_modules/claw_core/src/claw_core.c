@@ -21,6 +21,7 @@
 
 #include "claw_core_llm.h"
 #include "claw_event_publisher.h"
+#include "llm/claw_llm_http_transport.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "claw_core";
@@ -81,6 +82,15 @@ typedef struct {
     SemaphoreHandle_t response_lock;
     claw_core_pending_response_t *pending_head;
     claw_core_pending_response_t *pending_tail;
+    SemaphoreHandle_t inflight_lock;
+    uint32_t inflight_request_id;
+    volatile bool inflight_abort;
+#define CLAW_CORE_MAX_COMPLETION_OBSERVERS 4
+    struct {
+        claw_core_completion_observer_fn fn;
+        void *user_ctx;
+    } completion_observers[CLAW_CORE_MAX_COMPLETION_OBSERVERS];
+    size_t completion_observer_count;
 } claw_core_state_t;
 
 static claw_core_state_t s_core = {0};
@@ -168,6 +178,52 @@ static char *build_session_assistant_text(const char *tool_summary, const char *
     }
 
     return combined;
+}
+
+#define CLAW_CORE_OBS_CSV_MAX 384
+
+static bool obs_csv_contains(const char *csv, const char *name)
+{
+    const char *needle = name;
+    const char *p = csv;
+    size_t need_len;
+
+    if (!csv || !name) {
+        return false;
+    }
+    need_len = strlen(needle);
+    while (*p) {
+        if (strncmp(p, needle, need_len) == 0 && (p[need_len] == ',' || p[need_len] == '\0')) {
+            return true;
+        }
+        const char *next = strchr(p, ',');
+        if (!next) {
+            break;
+        }
+        p = next + 1;
+    }
+    return false;
+}
+
+static void obs_csv_append(char *csv, size_t csv_size, const char *name, bool dedup)
+{
+    size_t cur;
+    int written;
+
+    if (!csv || csv_size == 0 || !name || !name[0]) {
+        return;
+    }
+    if (dedup && obs_csv_contains(csv, name)) {
+        return;
+    }
+    cur = strlen(csv);
+    if (cur >= csv_size - 1) {
+        return;
+    }
+    written = snprintf(csv + cur, csv_size - cur, "%s%s", cur == 0 ? "" : ",", name);
+    if (written < 0 || (size_t)written >= csv_size - cur) {
+        csv[csv_size - 1] = '\0';
+    }
 }
 
 static void log_tool_call_names(uint32_t request_id, const claw_core_llm_response_t *response)
@@ -925,7 +981,9 @@ static esp_err_t build_iteration_context(const claw_core_request_item_t *request
                                          const cJSON *runtime_messages,
                                          char **out_system_prompt,
                                          cJSON **out_messages,
-                                         char **out_tools_json)
+                                         char **out_tools_json,
+                                         char *obs_providers_csv,
+                                         size_t obs_providers_csv_size)
 {
     char *system_prompt = NULL;
     char *turn_prompt = NULL;
@@ -985,6 +1043,7 @@ static esp_err_t build_iteration_context(const claw_core_request_item_t *request
                  provider->name,
                  context_kind_to_string(context.kind),
                  (unsigned)context_len);
+        obs_csv_append(obs_providers_csv, obs_providers_csv_size, provider->name, true);
 
         switch (context.kind) {
         case CLAW_CORE_CONTEXT_KIND_SYSTEM_PROMPT:
@@ -1069,10 +1128,19 @@ static void claw_core_task(void *arg)
         claw_core_llm_response_t llm_response = {0};
         uint32_t iteration = 0;
         esp_err_t err = ESP_OK;
+        char obs_providers_csv[CLAW_CORE_OBS_CSV_MAX] = {0};
+        char obs_tool_calls_csv[CLAW_CORE_OBS_CSV_MAX] = {0};
 
         if (xQueueReceive(s_core.request_queue, &request, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+
+        if (xSemaphoreTake(s_core.inflight_lock, portMAX_DELAY) == pdTRUE) {
+            s_core.inflight_request_id = request.view.request_id;
+            s_core.inflight_abort = false;
+            xSemaphoreGive(s_core.inflight_lock);
+        }
+        claw_llm_http_arm_abort(&s_core.inflight_abort);
 
         response.view.request_id = request.view.request_id;
         response.view.status = CLAW_CORE_RESPONSE_STATUS_ERROR;
@@ -1115,7 +1183,9 @@ static void claw_core_task(void *arg)
                                           runtime_messages,
                                           &system_prompt,
                                           &messages,
-                                          &tools_json);
+                                          &tools_json,
+                                          obs_providers_csv,
+                                          sizeof(obs_providers_csv));
             if (err != ESP_OK) {
                 response.view.error_message = dup_string(esp_err_to_name(err));
                 goto finish_request;
@@ -1141,6 +1211,12 @@ static void claw_core_task(void *arg)
 
             log_tool_call_names(request.view.request_id, &llm_response);
             publish_stage_tool_calls(&request.view, &llm_response, iteration);
+            for (size_t tc = 0; tc < llm_response.tool_call_count; tc++) {
+                obs_csv_append(obs_tool_calls_csv,
+                               sizeof(obs_tool_calls_csv),
+                               llm_response.tool_calls[tc].name,
+                               false);
+            }
 
             err = append_assistant_tool_calls(runtime_messages, &llm_response);
             if (err != ESP_OK) {
@@ -1186,11 +1262,37 @@ static void claw_core_task(void *arg)
                 }
             }
             free(session_assistant_text);
+            if (s_core.completion_observer_count > 0) {
+                claw_core_completion_summary_t summary = {
+                    .request_id = request.view.request_id,
+                    .session_id = request.view.session_id,
+                    .final_text = response.view.text,
+                    .context_providers_csv = obs_providers_csv,
+                    .tool_calls_csv = obs_tool_calls_csv,
+                };
+                for (size_t i = 0; i < s_core.completion_observer_count; i++) {
+                    s_core.completion_observers[i].fn(&summary,
+                                                     s_core.completion_observers[i].user_ctx);
+                }
+            }
         } else if (!response.view.error_message) {
             response.view.error_message = dup_string(esp_err_to_name(err));
         }
 
 finish_request:
+        claw_llm_http_disarm_abort();
+        if (xSemaphoreTake(s_core.inflight_lock, portMAX_DELAY) == pdTRUE) {
+            bool was_cancelled = s_core.inflight_abort;
+            s_core.inflight_request_id = 0;
+            s_core.inflight_abort = false;
+            xSemaphoreGive(s_core.inflight_lock);
+            if (was_cancelled && err != ESP_OK && response.view.error_message) {
+                /* Replace the generic transport error with a clearer one. */
+                free(response.view.error_message);
+                response.view.error_message = dup_string("request cancelled");
+            }
+        }
+
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "request=%" PRIu32 " failed: %s",
                      request.view.request_id,
@@ -1267,7 +1369,9 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
     s_core.request_queue = xQueueCreate(request_queue_len, sizeof(claw_core_request_item_t));
     s_core.response_queue = xQueueCreate(response_queue_len, sizeof(claw_core_response_item_t));
     s_core.response_lock = xSemaphoreCreateMutex();
-    if (!s_core.request_queue || !s_core.response_queue || !s_core.response_lock) {
+    s_core.inflight_lock = xSemaphoreCreateMutex();
+    if (!s_core.request_queue || !s_core.response_queue ||
+            !s_core.response_lock || !s_core.inflight_lock) {
         free_context_provider_storage();
         free(s_core.system_prompt);
         if (s_core.request_queue) {
@@ -1278,6 +1382,9 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
         }
         if (s_core.response_lock) {
             vSemaphoreDelete(s_core.response_lock);
+        }
+        if (s_core.inflight_lock) {
+            vSemaphoreDelete(s_core.inflight_lock);
         }
         memset(&s_core, 0, sizeof(s_core));
         return ESP_ERR_NO_MEM;
@@ -1301,6 +1408,7 @@ esp_err_t claw_core_init(const claw_core_config_t *config)
         vQueueDelete(s_core.request_queue);
         vQueueDelete(s_core.response_queue);
         vSemaphoreDelete(s_core.response_lock);
+        vSemaphoreDelete(s_core.inflight_lock);
         memset(&s_core, 0, sizeof(s_core));
         return err;
     }
@@ -1372,6 +1480,24 @@ esp_err_t claw_core_add_context_provider(const claw_core_context_provider_t *pro
     return ESP_OK;
 }
 
+esp_err_t claw_core_add_completion_observer(claw_core_completion_observer_fn observer,
+                                            void *user_ctx)
+{
+    if (!s_core.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!observer) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_core.completion_observer_count >= CLAW_CORE_MAX_COMPLETION_OBSERVERS) {
+        return ESP_ERR_NO_MEM;
+    }
+    s_core.completion_observers[s_core.completion_observer_count].fn = observer;
+    s_core.completion_observers[s_core.completion_observer_count].user_ctx = user_ctx;
+    s_core.completion_observer_count++;
+    return ESP_OK;
+}
+
 esp_err_t claw_core_call_cap(const char *cap_name,
                              const char *input_json,
                              const claw_core_request_t *request,
@@ -1386,6 +1512,27 @@ esp_err_t claw_core_call_cap(const char *cap_name,
                            request,
                            out_output,
                            s_core.cap_user_ctx);
+}
+
+esp_err_t claw_core_cancel_request(uint32_t request_id)
+{
+    bool armed = false;
+
+    if (!s_core.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_core.inflight_lock, pdMS_TO_TICKS(200)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (s_core.inflight_request_id != 0 &&
+            (request_id == 0 || s_core.inflight_request_id == request_id)) {
+        s_core.inflight_abort = true;
+        armed = true;
+        ESP_LOGI(TAG, "Cancel armed for in-flight request=%" PRIu32,
+                 s_core.inflight_request_id);
+    }
+    xSemaphoreGive(s_core.inflight_lock);
+    return armed ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
 esp_err_t claw_core_submit(const claw_core_request_t *request, uint32_t timeout_ms)

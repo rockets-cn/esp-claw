@@ -156,6 +156,31 @@ esp_err_t display_hal_create(esp_lcd_panel_handle_t panel_handle,
     ESP_GOTO_ON_FALSE(lcd_width > 0 && lcd_height > 0, ESP_ERR_INVALID_ARG,
                       fail, TAG, "invalid lcd size");
 
+    if (s_state.panel == panel_handle &&
+            s_state.io == io_handle &&
+            s_state.panel_if == panel_if &&
+            s_state.width == lcd_width &&
+            s_state.height == lcd_height &&
+            s_state.display_flush_done != NULL &&
+            s_state.display_callbacks_registered &&
+            (!display_hal_panel_requires_swap() || s_state.submit_swap_buffer != NULL)) {
+        ESP_LOGD(TAG, "display_hal_create: already initialized with matching params, no-op");
+        ret = ESP_OK;
+        goto fail;
+    }
+
+    if (s_state.submit_swap_buffer) {
+        ESP_LOGW(TAG, "display_hal_create: freeing leftover swap buffer (%u px)",
+                 (unsigned)s_state.submit_swap_buffer_pixels);
+        heap_caps_free(s_state.submit_swap_buffer);
+        s_state.submit_swap_buffer = NULL;
+        s_state.submit_swap_buffer_pixels = 0;
+    }
+    if (s_state.display_callbacks_registered) {
+        ESP_LOGW(TAG, "display_hal_create: clearing leftover display callbacks");
+        (void)display_hal_clear_display_callbacks_locked();
+    }
+
     s_state.panel = panel_handle;
     s_state.io = io_handle;
     s_state.panel_if = panel_if;
@@ -169,8 +194,6 @@ esp_err_t display_hal_create(esp_lcd_panel_handle_t panel_handle,
     s_state.frame_active = false;
     s_state.flush_in_flight = false;
     s_state.framebuffer_initialized = false;
-    s_state.submit_swap_buffer = NULL;
-    s_state.submit_swap_buffer_pixels = 0;
     if (display_hal_panel_requires_swap()) {
         s_state.submit_swap_buffer = heap_caps_aligned_alloc(16, (size_t)lcd_width * (size_t)lcd_height * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         ESP_GOTO_ON_FALSE(s_state.submit_swap_buffer != NULL, ESP_ERR_NO_MEM, fail, TAG, "alloc submit swap buffer failed");

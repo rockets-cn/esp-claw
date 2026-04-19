@@ -104,6 +104,10 @@ esp_err_t claw_event_router_init(const claw_event_router_config_t *config);
 esp_err_t claw_event_router_start(void);
 esp_err_t claw_event_router_stop(void);
 esp_err_t claw_event_router_reload(void);
+esp_err_t claw_event_router_cancel_event(const char *event_id);
+esp_err_t claw_event_router_purge_queue(const char *event_type_filter,
+                                        const char *source_cap_filter,
+                                        size_t *out_cancelled);
 esp_err_t claw_event_router_register_outbound_binding(const char *channel,
                                                       const char *cap_name);
 esp_err_t claw_event_router_handle_event(const claw_event_t *event,

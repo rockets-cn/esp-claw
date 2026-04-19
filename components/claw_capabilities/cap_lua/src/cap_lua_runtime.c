@@ -29,10 +29,14 @@ typedef struct {
     size_t size;
     size_t len;
     bool truncated;
+    /* deadline_us == 0 means "no wall-clock deadline" (cancel-only mode). */
     int64_t deadline_us;
+    volatile bool *stop_requested;
 } cap_lua_exec_ctx_t;
 
-static void cap_lua_output_append(cap_lua_exec_ctx_t *ctx, const char *text, size_t len)
+static void cap_lua_output_append(cap_lua_exec_ctx_t *ctx,
+                                  const char *text,
+                                  size_t len)
 {
     size_t room;
     size_t copy;
@@ -109,7 +113,8 @@ static void cap_lua_push_json_value(lua_State *L, const cJSON *item)
 
 static int cap_lua_print_capture(lua_State *L)
 {
-    cap_lua_exec_ctx_t *ctx = (cap_lua_exec_ctx_t *)lua_touserdata(L, lua_upvalueindex(1));
+    cap_lua_exec_ctx_t *ctx = (cap_lua_exec_ctx_t *)lua_touserdata(
+                                  L, lua_upvalueindex(1));
     int top = lua_gettop(L);
     int i;
 
@@ -145,7 +150,12 @@ static void cap_lua_timeout_hook(lua_State *L, lua_Debug *ar)
         return;
     }
 
-    if (esp_timer_get_time() > ctx->deadline_us) {
+    /* Cooperative cancellation always wins over deadline reporting. */
+    if (ctx->stop_requested && *ctx->stop_requested) {
+        luaL_error(L, "stopped by user");
+    }
+
+    if (ctx->deadline_us != 0 && esp_timer_get_time() > ctx->deadline_us) {
         luaL_error(L, "execution timed out");
     }
     /* Yield so tight Lua loops cannot starve IDLE / trigger the task WDT (see report P2-13). */
@@ -201,21 +211,29 @@ static void cap_lua_run_runtime_cleanups(void)
 
 esp_err_t cap_lua_runtime_init(void)
 {
-    ESP_LOGI(TAG, "Lua runtime ready: scripts=%s registered_modules=%u", cap_lua_get_base_dir(),
+    ESP_LOGI(TAG,
+             "Lua runtime ready: scripts=%s registered_modules=%u",
+             cap_lua_get_base_dir(),
              (unsigned int)cap_lua_get_module_count());
     return ESP_OK;
 }
 
-esp_err_t cap_lua_runtime_execute_file(const char *path, const char *args_json, uint32_t timeout_ms, char *output,
+esp_err_t cap_lua_runtime_execute_file(const char *path,
+                                       const char *args_json,
+                                       uint32_t timeout_ms,
+                                       volatile bool *stop_requested,
+                                       char *output,
                                        size_t output_size)
 {
     struct stat st = {0};
     lua_State *L = NULL;
-    uint32_t effective_timeout_ms = timeout_ms ? timeout_ms : CAP_LUA_MAX_EXEC_MS;
     cap_lua_exec_ctx_t ctx = {
         .buf = output,
         .size = output_size,
-        .deadline_us = esp_timer_get_time() + ((int64_t)effective_timeout_ms * 1000),
+        .deadline_us = (timeout_ms == 0)
+                       ? 0
+                       : esp_timer_get_time() + ((int64_t)timeout_ms * 1000),
+        .stop_requested = stop_requested,
     };
     int status;
 
@@ -225,7 +243,10 @@ esp_err_t cap_lua_runtime_execute_file(const char *path, const char *args_json, 
     output[0] = '\0';
 
     if (!cap_lua_path_is_valid(path)) {
-        snprintf(output, output_size, "Error: Lua path must be under %s and end with .lua", cap_lua_get_base_dir());
+        snprintf(output,
+                 output_size,
+                 "Error: Lua path must be under %s and end with .lua",
+                 cap_lua_get_base_dir());
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -261,7 +282,9 @@ esp_err_t cap_lua_runtime_execute_file(const char *path, const char *args_json, 
         if (ctx.len > 0) {
             cap_lua_output_append(&ctx, "ERROR: ", 7);
         }
-        cap_lua_output_append(&ctx, msg ? msg : "unknown Lua error", strlen(msg ? msg : "unknown Lua error"));
+        cap_lua_output_append(&ctx,
+                              msg ? msg : "unknown Lua error",
+                              strlen(msg ? msg : "unknown Lua error"));
         cap_lua_output_append(&ctx, "\n", 1);
         lua_close(L);
         return ESP_FAIL;

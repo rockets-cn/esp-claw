@@ -122,14 +122,28 @@ struct claw_core_response {
     char *error_message;
 };
 
+typedef struct {
+    uint32_t request_id;
+    const char *session_id;            /* may be NULL */
+    const char *final_text;            /* may be NULL or empty */
+    const char *context_providers_csv; /* providers that injected non-empty content */
+    const char *tool_calls_csv;        /* tool calls invoked across all rounds */
+} claw_core_completion_summary_t;
+
+typedef void (*claw_core_completion_observer_fn)(const claw_core_completion_summary_t *summary,
+                                                 void *user_ctx);
+
 esp_err_t claw_core_init(const claw_core_config_t *config);
 esp_err_t claw_core_start(void);
 esp_err_t claw_core_add_context_provider(const claw_core_context_provider_t *provider);
+esp_err_t claw_core_add_completion_observer(claw_core_completion_observer_fn observer,
+                                            void *user_ctx);
 esp_err_t claw_core_call_cap(const char *cap_name,
                              const char *input_json,
                              const claw_core_request_t *request,
                              char **out_output);
 esp_err_t claw_core_submit(const claw_core_request_t *request, uint32_t timeout_ms);
+esp_err_t claw_core_cancel_request(uint32_t request_id);
 esp_err_t claw_core_receive(claw_core_response_t *response, uint32_t timeout_ms);
 esp_err_t claw_core_receive_for(uint32_t request_id,
                                 claw_core_response_t *response,

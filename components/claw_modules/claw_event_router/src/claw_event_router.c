@@ -29,7 +29,7 @@ static const char *TAG = "claw_event_router";
 #define CLAW_EVENT_ROUTER_DEFAULT_MAX_RULES          32
 #define CLAW_EVENT_ROUTER_DEFAULT_MAX_ACTIONS         8
 #define CLAW_EVENT_ROUTER_DEFAULT_OUTPUT_SIZE      2048
-#define CLAW_EVENT_ROUTER_DEFAULT_QUEUE_LEN          16
+#define CLAW_EVENT_ROUTER_DEFAULT_QUEUE_LEN          6
 #define CLAW_EVENT_ROUTER_DEFAULT_STACK            8192
 #define CLAW_EVENT_ROUTER_DEFAULT_PRIO               5
 #define CLAW_EVENT_ROUTER_DEFAULT_SUBMIT          1000
@@ -40,6 +40,17 @@ static const char *TAG = "claw_event_router";
 #define CLAW_EVENT_ROUTER_FIELD_SIZE               96
 #define CLAW_EVENT_ROUTER_cap_SIZE          64
 #define CLAW_EVENT_ROUTER_BINDING_SIZE             16
+#define CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE        6
+_Static_assert(CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE >= CLAW_EVENT_ROUTER_DEFAULT_QUEUE_LEN,
+               "pending table must cover the default event queue length");
+
+typedef struct {
+    bool used;
+    bool cancelled;
+    char event_id[48];
+    char event_type[32];
+    char source_cap[32];
+} claw_event_router_pending_t;
 
 typedef struct {
     char channel[24];
@@ -64,6 +75,8 @@ typedef struct {
     size_t rule_count;
     claw_event_router_result_t last_result;
     claw_event_router_config_t config;
+    claw_event_router_pending_t pending[CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE];
+    size_t pending_dropped;
 } claw_event_router_runtime_t;
 
 static claw_event_router_runtime_t s_runtime = {
@@ -213,6 +226,103 @@ static void claw_event_router_lock(void)
 static void claw_event_router_unlock(void)
 {
     xSemaphoreGiveRecursive(s_runtime.mutex);
+}
+
+static int pending_find_slot_locked(const char *event_id)
+{
+    if (!event_id || !event_id[0]) {
+        return -1;
+    }
+    for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
+        if (s_runtime.pending[i].used &&
+                strcmp(s_runtime.pending[i].event_id, event_id) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int pending_alloc_slot_locked(void)
+{
+    int oldest = -1;
+
+    for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
+        if (!s_runtime.pending[i].used) {
+            return i;
+        }
+    }
+    for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
+        if (!s_runtime.pending[i].cancelled) {
+            oldest = i;
+            break;
+        }
+    }
+    if (oldest < 0) {
+        oldest = 0;
+    }
+    return oldest;
+}
+
+static void pending_track(const claw_event_t *event)
+{
+    if (!event || !event->event_id[0]) {
+        return;
+    }
+    claw_event_router_lock();
+    int slot = pending_find_slot_locked(event->event_id);
+    if (slot < 0) {
+        slot = pending_alloc_slot_locked();
+        if (s_runtime.pending[slot].used) {
+            s_runtime.pending_dropped++;
+            ESP_LOGW(TAG,
+                     "Pending table full, evicting %s to track %s (dropped=%u)",
+                     s_runtime.pending[slot].event_id,
+                     event->event_id,
+                     (unsigned)s_runtime.pending_dropped);
+        }
+    }
+    memset(&s_runtime.pending[slot], 0, sizeof(s_runtime.pending[slot]));
+    s_runtime.pending[slot].used = true;
+    s_runtime.pending[slot].cancelled = false;
+    strlcpy(s_runtime.pending[slot].event_id,
+            event->event_id, sizeof(s_runtime.pending[slot].event_id));
+    strlcpy(s_runtime.pending[slot].event_type,
+            event->event_type, sizeof(s_runtime.pending[slot].event_type));
+    strlcpy(s_runtime.pending[slot].source_cap,
+            event->source_cap, sizeof(s_runtime.pending[slot].source_cap));
+    claw_event_router_unlock();
+}
+
+static bool pending_take_for_event_id(const char *event_id)
+{
+    bool cancelled = false;
+
+    if (!event_id || !event_id[0]) {
+        return false;
+    }
+    claw_event_router_lock();
+    int slot = pending_find_slot_locked(event_id);
+    if (slot >= 0) {
+        cancelled = s_runtime.pending[slot].cancelled;
+        memset(&s_runtime.pending[slot], 0, sizeof(s_runtime.pending[slot]));
+    }
+    claw_event_router_unlock();
+    return cancelled;
+}
+
+static bool pending_match_filter(const claw_event_router_pending_t *entry,
+                                 const char *event_type_filter,
+                                 const char *source_cap_filter)
+{
+    if (event_type_filter && event_type_filter[0] &&
+            strcmp(entry->event_type, event_type_filter) != 0) {
+        return false;
+    }
+    if (source_cap_filter && source_cap_filter[0] &&
+            strcmp(entry->source_cap, source_cap_filter) != 0) {
+        return false;
+    }
+    return true;
 }
 
 static void claw_event_router_trim_copy(char *dst, size_t dst_size, const char *src)
@@ -1902,6 +2012,14 @@ static void claw_event_router_task(void *arg)
         if (xQueueReceive(s_runtime.event_queue, &event, pdMS_TO_TICKS(250)) != pdTRUE) {
             continue;
         }
+        if (pending_take_for_event_id(event.event_id)) {
+            ESP_LOGI(TAG, "Skipping cancelled event %s (type=%s, source=%s)",
+                     event.event_id,
+                     event.event_type[0] ? event.event_type : "(none)",
+                     event.source_cap[0] ? event.source_cap : "(none)");
+            claw_event_free(&event);
+            continue;
+        }
         if (claw_event_router_process_event(&event, &result) != ESP_OK) {
             ESP_LOGW(TAG, "Failed to process event %s", event.event_id);
         }
@@ -1945,9 +2063,15 @@ esp_err_t claw_event_router_init(const claw_event_router_config_t *config)
         s_runtime.cap_output_size = config->cap_output_size;
     }
 
-    s_runtime.event_queue = xQueueCreate(
-                                config && config->event_queue_len ? config->event_queue_len : CLAW_EVENT_ROUTER_DEFAULT_QUEUE_LEN,
-                                sizeof(claw_event_t));
+    uint32_t queue_len = config && config->event_queue_len ? config->event_queue_len
+                                                            : CLAW_EVENT_ROUTER_DEFAULT_QUEUE_LEN;
+    if (queue_len > CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE) {
+        ESP_LOGE(TAG, "event_queue_len=%u exceeds pending table size %u",
+                 (unsigned)queue_len,
+                 (unsigned)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE);
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_runtime.event_queue = xQueueCreate(queue_len, sizeof(claw_event_t));
     if (!s_runtime.event_queue) {
         return ESP_ERR_NO_MEM;
     }
@@ -2052,6 +2176,68 @@ esp_err_t claw_event_router_reload(void)
     return ESP_OK;
 }
 
+esp_err_t claw_event_router_cancel_event(const char *event_id)
+{
+    bool armed = false;
+
+    if (!s_runtime.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!event_id || !event_id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    claw_event_router_lock();
+    int slot = pending_find_slot_locked(event_id);
+    if (slot >= 0 && !s_runtime.pending[slot].cancelled) {
+        s_runtime.pending[slot].cancelled = true;
+        armed = true;
+        ESP_LOGI(TAG, "Cancel armed for queued event %s (type=%s, source=%s)",
+                 s_runtime.pending[slot].event_id,
+                 s_runtime.pending[slot].event_type,
+                 s_runtime.pending[slot].source_cap);
+    }
+    claw_event_router_unlock();
+    return armed ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t claw_event_router_purge_queue(const char *event_type_filter,
+                                        const char *source_cap_filter,
+                                        size_t *out_cancelled)
+{
+    size_t armed = 0;
+
+    if (!s_runtime.initialized) {
+        if (out_cancelled) {
+            *out_cancelled = 0;
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    claw_event_router_lock();
+    for (int i = 0; i < (int)CLAW_EVENT_ROUTER_PENDING_TABLE_SIZE; i++) {
+        if (!s_runtime.pending[i].used || s_runtime.pending[i].cancelled) {
+            continue;
+        }
+        if (!pending_match_filter(&s_runtime.pending[i],
+                                  event_type_filter, source_cap_filter)) {
+            continue;
+        }
+        s_runtime.pending[i].cancelled = true;
+        armed++;
+    }
+    claw_event_router_unlock();
+
+    ESP_LOGI(TAG, "Purge queued events: type=%s source=%s armed=%u",
+             (event_type_filter && event_type_filter[0]) ? event_type_filter : "(any)",
+             (source_cap_filter && source_cap_filter[0]) ? source_cap_filter : "(any)",
+             (unsigned)armed);
+    if (out_cancelled) {
+        *out_cancelled = armed;
+    }
+    return ESP_OK;
+}
+
 esp_err_t claw_event_router_publish(const claw_event_t *event)
 {
     claw_event_t cloned = {0};
@@ -2065,7 +2251,9 @@ esp_err_t claw_event_router_publish(const claw_event_t *event)
     if (err != ESP_OK) {
         return err;
     }
+    pending_track(&cloned);
     if (xQueueSend(s_runtime.event_queue, &cloned, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        (void)pending_take_for_event_id(cloned.event_id);
         claw_event_free(&cloned);
         return ESP_ERR_TIMEOUT;
     }
