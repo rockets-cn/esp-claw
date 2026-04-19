@@ -1,11 +1,9 @@
 idf_component_register(
-    SRC_DIRS
-        "."
+    SRCS
+        "src/lua_module_mcpwm.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         cap_lua
-        esp_codec_dev
-        esp-dsp
-        driver
+        esp_driver_mcpwm
 )

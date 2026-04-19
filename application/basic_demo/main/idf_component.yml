@@ -134,3 +134,6 @@ dependencies:
 
   lua_module_system:
     path: ../../../components/lua_modules/lua_module_system
+
+  lua_module_mcpwm:
+    path: ../../../components/lua_modules/lua_module_mcpwm

@@ -11,8 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_dsp.h"
 #include "esp_codec_dev.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -21,17 +20,20 @@
 
 static const char *TAG = "lua_audio";
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
 /* --------------------------------------------------------------------------
  * Audio constants
  * -------------------------------------------------------------------------- */
-#define AUDIO_CHUNK_BYTES      512
-#define AUDIO_DEFAULT_VOL      80
-#define AUDIO_DEFAULT_GAIN_DB  10.0f
-#define AUDIO_HANDLE_METATABLE "lua_audio_handle"
+#define AUDIO_CHUNK_BYTES       512
+#define AUDIO_DEFAULT_VOL       80
+#define AUDIO_DEFAULT_GAIN_DB   30.0f
+#define AUDIO_BASE_PATH         "/fatfs/"
+#define AUDIO_HANDLE_METATABLE  "lua_audio_handle"
+#define AUDIO_SPECTRUM_MIN_FFT  64
+#define AUDIO_SPECTRUM_MAX_FFT  4096
+#define AUDIO_SPECTRUM_DEF_FFT  512
+#define AUDIO_SPECTRUM_DEF_BANDS 16
+#define AUDIO_SPECTRUM_DB_MIN   (-90.0f)
+#define AUDIO_SPECTRUM_DB_MAX   (-20.0f)
 
 typedef enum {
     AUDIO_HANDLE_INPUT = 0,
@@ -60,6 +62,9 @@ typedef struct {
     uint32_t data_offset;
     uint32_t data_size;
 } audio_wav_info_t;
+
+static bool s_fft_ready = false;
+static int s_fft_init_size = 0;
 
 static void wav_write_u16(uint8_t *dst, uint16_t v)
 {
@@ -165,10 +170,14 @@ static esp_err_t wav_parse(FILE *f, audio_wav_info_t *info)
  * -------------------------------------------------------------------------- */
 static bool audio_path_valid(const char *path, const char *ext)
 {
+    size_t base_len = strlen(AUDIO_BASE_PATH);
     size_t ext_len = strlen(ext);
     size_t len;
 
-    if (!path || !path[0] || strstr(path, "..")) {
+    if (!path || strstr(path, "..")) {
+        return false;
+    }
+    if (strncmp(path, AUDIO_BASE_PATH, base_len) != 0) {
         return false;
     }
     len = strlen(path);
@@ -258,6 +267,75 @@ static esp_err_t audio_handle_activate(audio_lua_handle_t *handle)
         return ESP_FAIL;
     }
     return ESP_OK;
+}
+
+static bool audio_is_power_of_two(uint32_t value)
+{
+    return value != 0 && (value & (value - 1U)) == 0;
+}
+
+static esp_err_t audio_fft_ensure_ready(int fft_size)
+{
+    if (s_fft_ready && s_fft_init_size >= fft_size) {
+        return ESP_OK;
+    }
+
+    if (s_fft_ready) {
+        dsps_fft2r_deinit_fc32();
+        s_fft_ready = false;
+        s_fft_init_size = 0;
+    }
+
+    esp_err_t err = dsps_fft2r_init_fc32(NULL, fft_size);
+    if (err == ESP_OK) {
+        s_fft_ready = true;
+        s_fft_init_size = fft_size;
+    }
+    return err;
+}
+
+static uint8_t audio_spectrum_db_to_level(float db)
+{
+    if (db <= AUDIO_SPECTRUM_DB_MIN) {
+        return 0;
+    }
+    if (db >= AUDIO_SPECTRUM_DB_MAX) {
+        return 255;
+    }
+
+    float scaled = (db - AUDIO_SPECTRUM_DB_MIN) * 255.0f /
+                   (AUDIO_SPECTRUM_DB_MAX - AUDIO_SPECTRUM_DB_MIN);
+    if (scaled < 0.0f) {
+        scaled = 0.0f;
+    } else if (scaled > 255.0f) {
+        scaled = 255.0f;
+    }
+    return (uint8_t)(scaled + 0.5f);
+}
+
+static uint32_t audio_spectrum_log_bin_start(uint32_t band, uint32_t band_count, uint32_t half_bins)
+{
+    double min_bin = 1.0;
+    double max_bin = (double)(half_bins - 1);
+    double ratio;
+    double pos;
+
+    if (half_bins <= 1 || band_count == 0) {
+        return 1;
+    }
+    if (band == 0) {
+        return 1;
+    }
+
+    ratio = pow(max_bin / min_bin, 1.0 / (double)band_count);
+    pos = min_bin * pow(ratio, (double)band);
+    if (pos < 1.0) {
+        pos = 1.0;
+    }
+    if (pos > max_bin) {
+        pos = max_bin;
+    }
+    return (uint32_t)pos;
 }
 
 static audio_lua_handle_t *lua_audio_check_any_handle(lua_State *L, int idx, const char *what)
@@ -376,7 +454,6 @@ static int lua_audio_close(lua_State *L)
 
 /* --------------------------------------------------------------------------
  * audio.play_wav(output_handle, path) -> nil
- * path must be a .wav file and must not contain "..".
  * -------------------------------------------------------------------------- */
 static int lua_audio_play_wav(lua_State *L)
 {
@@ -387,7 +464,7 @@ static int lua_audio_play_wav(lua_State *L)
     audio_wav_info_t info = {0};
 
     if (!audio_path_valid(path, ".wav")) {
-        return luaL_error(L, "audio play_wav: path must be a .wav file and must not contain '..'");
+        return luaL_error(L, "audio play_wav: path must be a .wav file under %s", AUDIO_BASE_PATH);
     }
 
     f = fopen(path, "rb");
@@ -439,104 +516,7 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------
- * audio.play_tone(output_handle, freq_hz, duration_ms [, volume_pct [, wait_done]]) -> nil
- * -------------------------------------------------------------------------- */
-static int lua_audio_play_tone(lua_State *L)
-{
-    audio_lua_handle_t *dac = lua_audio_check_handle(L, 1, AUDIO_HANDLE_OUTPUT, "play_tone");
-    uint32_t freq_hz = lua_audio_check_u32_arg(L, 2, "freq_hz");
-    uint32_t duration_ms = lua_audio_check_u32_arg(L, 3, "duration_ms");
-    int volume_pct = (int)luaL_optinteger(L, 4, 90);
-    bool wait_done = false;
-    int16_t *buf = NULL;
-    uint32_t total_frames;
-    uint32_t frames_written = 0;
-    uint32_t chunk_frames;
-    float amplitude;
-    float phase = 0.0f;
-    float phase_step;
-    float gain_scale;
-    TickType_t start_tick;
-    TickType_t target_ticks;
-
-    if (volume_pct < 0 || volume_pct > 100) {
-        return luaL_error(L, "audio play_tone: volume_pct must be 0..100");
-    }
-    if (!lua_isnoneornil(L, 5)) {
-        wait_done = lua_toboolean(L, 5);
-    }
-    if (dac->bits_per_sample != 16 || dac->bytes_per_sample != sizeof(int16_t)) {
-        return luaL_error(L, "audio play_tone: only 16-bit PCM output is supported");
-    }
-    if (freq_hz >= dac->sample_rate / 2) {
-        return luaL_error(L, "audio play_tone: freq_hz must be less than half of sample_rate");
-    }
-
-    chunk_frames = AUDIO_CHUNK_BYTES / (dac->channels * dac->bytes_per_sample);
-    if (chunk_frames == 0) {
-        return luaL_error(L, "audio play_tone: invalid output frame size");
-    }
-
-    total_frames = (uint32_t)(((uint64_t)dac->sample_rate * duration_ms) / 1000);
-    start_tick = xTaskGetTickCount();
-    target_ticks = pdMS_TO_TICKS(duration_ms);
-    if (target_ticks == 0 && duration_ms > 0) {
-        target_ticks = 1;
-    }
-    if (volume_pct == 0) {
-        gain_scale = 0.0f;
-    } else {
-        /* Match esp_codec_dev default volume semantics: [1, 100] -> [-49.5 dB, 0 dB]. */
-        float gain_db = ((float)volume_pct - 100.0f) * 0.5f;
-        gain_scale = powf(10.0f, gain_db / 20.0f);
-    }
-    amplitude = 32767.0f * gain_scale;
-    phase_step = 2.0f * (float)M_PI * (float)freq_hz / (float)dac->sample_rate;
-
-    buf = (int16_t *)malloc(chunk_frames * dac->channels * sizeof(int16_t));
-    if (!buf) {
-        return luaL_error(L, "audio play_tone: out of memory");
-    }
-
-    /* Generate one tone chunk at a time to avoid a large temporary buffer. */
-    while (frames_written < total_frames) {
-        uint32_t frames_this_chunk = total_frames - frames_written;
-        if (frames_this_chunk > chunk_frames) {
-            frames_this_chunk = chunk_frames;
-        }
-
-        for (uint32_t i = 0; i < frames_this_chunk; i++) {
-            int16_t sample = (int16_t)(sinf(phase) * amplitude);
-            for (uint8_t ch = 0; ch < dac->channels; ch++) {
-                buf[i * dac->channels + ch] = sample;
-            }
-            phase += phase_step;
-            if (phase >= 2.0f * (float)M_PI) {
-                phase -= 2.0f * (float)M_PI;
-            }
-        }
-
-        if (esp_codec_dev_write(dac->codec_dev, buf, (int)(frames_this_chunk * dac->channels * sizeof(int16_t))) != ESP_CODEC_DEV_OK) {
-            free(buf);
-            return luaL_error(L, "audio play_tone: write failed");
-        }
-        frames_written += frames_this_chunk;
-    }
-
-    if (wait_done) {
-        TickType_t elapsed_ticks = xTaskGetTickCount() - start_tick;
-        if (elapsed_ticks < target_ticks) {
-            vTaskDelay(target_ticks - elapsed_ticks);
-        }
-    }
-
-    free(buf);
-    return 0;
-}
-
-/* --------------------------------------------------------------------------
  * audio.record_wav(input_handle, path, duration_ms) -> { path, duration_ms, bytes }
- * path must be a .wav file and must not contain "..".
  * -------------------------------------------------------------------------- */
 static int lua_audio_record_wav(lua_State *L)
 {
@@ -549,7 +529,7 @@ static int lua_audio_record_wav(lua_State *L)
     uint8_t wav_hdr[44];
 
     if (!audio_path_valid(path, ".wav")) {
-        return luaL_error(L, "audio record_wav: path must be a .wav file and must not contain '..'");
+        return luaL_error(L, "audio record_wav: path must be a .wav file under %s", AUDIO_BASE_PATH);
     }
     if (duration_ms == 0) {
         return luaL_error(L, "audio record_wav: duration_ms must be positive");
@@ -808,6 +788,149 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------
+ * audio.read_spectrum(input_handle [, fft_size] [, band_count])
+ *   -> { bands = {...}, peak_freq_hz, peak_db, rms, fft_size, band_count, sample_rate }
+ * -------------------------------------------------------------------------- */
+static int lua_audio_read_spectrum(lua_State *L)
+{
+    audio_lua_handle_t *adc = lua_audio_check_handle(L, 1, AUDIO_HANDLE_INPUT, "read_spectrum");
+    uint32_t fft_size = (uint32_t)luaL_optinteger(L, 2, AUDIO_SPECTRUM_DEF_FFT);
+    uint32_t band_count = (uint32_t)luaL_optinteger(L, 3, AUDIO_SPECTRUM_DEF_BANDS);
+    uint8_t *pcm_buf = NULL;
+    float *window = NULL;
+    float *fft_buf = NULL;
+    esp_err_t err;
+    uint32_t total_bytes;
+    uint32_t captured = 0;
+    int64_t sum_sq = 0;
+    uint32_t mono_samples = 0;
+    uint32_t bytes_per_frame;
+    uint32_t half_bins;
+    uint32_t peak_bin = 0;
+    float peak_mag = 0.0f;
+
+    if (adc->bits_per_sample != 16) {
+        return luaL_error(L, "audio read_spectrum: only 16-bit PCM input is supported");
+    }
+    if (fft_size < AUDIO_SPECTRUM_MIN_FFT || fft_size > AUDIO_SPECTRUM_MAX_FFT || !audio_is_power_of_two(fft_size)) {
+        return luaL_error(L, "audio read_spectrum: fft_size must be a power of two in range 64..4096");
+    }
+    half_bins = fft_size / 2;
+    if (band_count == 0 || band_count > half_bins) {
+        return luaL_error(L, "audio read_spectrum: band_count must be in range 1..fft_size/2");
+    }
+
+    err = audio_fft_ensure_ready((int)fft_size);
+    if (err != ESP_OK) {
+        return luaL_error(L, "audio read_spectrum: FFT init failed: %s", esp_err_to_name(err));
+    }
+
+    window = (float *)malloc(sizeof(float) * fft_size);
+    fft_buf = (float *)calloc((size_t)fft_size * 2U, sizeof(float));
+    bytes_per_frame = (uint32_t)adc->channels * adc->bytes_per_sample;
+    total_bytes = fft_size * bytes_per_frame;
+    pcm_buf = (uint8_t *)malloc(total_bytes);
+    if (!window || !fft_buf || !pcm_buf) {
+        free(window);
+        free(fft_buf);
+        free(pcm_buf);
+        return luaL_error(L, "audio read_spectrum: out of memory");
+    }
+
+    dsps_wind_hann_f32(window, (int)fft_size);
+
+    while (captured < total_bytes) {
+        uint32_t chunk = total_bytes - captured;
+        if (chunk > AUDIO_CHUNK_BYTES) {
+            chunk = AUDIO_CHUNK_BYTES;
+            chunk -= (chunk % bytes_per_frame);
+            if (chunk == 0) {
+                chunk = bytes_per_frame;
+            }
+        }
+        if (esp_codec_dev_read(adc->codec_dev, pcm_buf + captured, (int)chunk) != ESP_CODEC_DEV_OK) {
+            free(window);
+            free(fft_buf);
+            free(pcm_buf);
+            return luaL_error(L, "audio read_spectrum: read failed");
+        }
+        captured += chunk;
+    }
+
+    for (uint32_t i = 0; i < fft_size; i++) {
+        const int16_t *frame = (const int16_t *)(pcm_buf + i * bytes_per_frame);
+        int32_t mixed = 0;
+
+        for (uint32_t ch = 0; ch < adc->channels; ch++) {
+            mixed += frame[ch];
+        }
+        mixed /= adc->channels;
+
+        sum_sq += (int64_t)mixed * mixed;
+        mono_samples++;
+
+        fft_buf[2 * i] = ((float)mixed / 32768.0f) * window[i];
+        fft_buf[2 * i + 1] = 0.0f;
+    }
+
+    dsps_fft2r_fc32(fft_buf, (int)fft_size);
+    dsps_bit_rev_fc32(fft_buf, (int)fft_size);
+
+    lua_newtable(L);
+    lua_newtable(L);
+    for (uint32_t band = 0; band < band_count; band++) {
+        uint32_t start_bin = audio_spectrum_log_bin_start(band, band_count, half_bins);
+        uint32_t end_bin = audio_spectrum_log_bin_start(band + 1, band_count, half_bins);
+        if (end_bin <= start_bin) {
+            end_bin = start_bin + 1;
+        }
+        if (end_bin > half_bins) {
+            end_bin = half_bins;
+        }
+
+        float band_peak = 0.0f;
+        for (uint32_t bin = start_bin; bin < end_bin; bin++) {
+            float real = fft_buf[2 * bin];
+            float imag = fft_buf[2 * bin + 1];
+            float mag = sqrtf(real * real + imag * imag);
+            if (mag > band_peak) {
+                band_peak = mag;
+            }
+            if (mag > peak_mag) {
+                peak_mag = mag;
+                peak_bin = bin;
+            }
+        }
+
+        float band_db = 20.0f * log10f((band_peak + 1e-9f) / (float)fft_size);
+        lua_pushinteger(L, (lua_Integer)audio_spectrum_db_to_level(band_db));
+        lua_rawseti(L, -2, (lua_Integer)band + 1);
+    }
+    lua_setfield(L, -2, "bands");
+
+    float peak_db = 20.0f * log10f((peak_mag + 1e-9f) / (float)fft_size);
+    int32_t rms = (mono_samples > 0) ? (int32_t)sqrt((double)sum_sq / mono_samples) : 0;
+
+    lua_pushnumber(L, ((lua_Number)peak_bin * (lua_Number)adc->sample_rate) / (lua_Number)fft_size);
+    lua_setfield(L, -2, "peak_freq_hz");
+    lua_pushnumber(L, peak_db);
+    lua_setfield(L, -2, "peak_db");
+    lua_pushinteger(L, rms);
+    lua_setfield(L, -2, "rms");
+    lua_pushinteger(L, (lua_Integer)fft_size);
+    lua_setfield(L, -2, "fft_size");
+    lua_pushinteger(L, (lua_Integer)band_count);
+    lua_setfield(L, -2, "band_count");
+    lua_pushinteger(L, (lua_Integer)adc->sample_rate);
+    lua_setfield(L, -2, "sample_rate");
+
+    free(window);
+    free(fft_buf);
+    free(pcm_buf);
+    return 1;
+}
+
+/* --------------------------------------------------------------------------
  * Module registration
  * -------------------------------------------------------------------------- */
 int luaopen_audio(lua_State *L)
@@ -816,7 +939,6 @@ int luaopen_audio(lua_State *L)
         {"new_input",      lua_audio_new_input},
         {"new_output",     lua_audio_new_output},
         {"close",          lua_audio_close},
-        {"play_tone",      lua_audio_play_tone},
         {"play_wav",       lua_audio_play_wav},
         {"record_wav",     lua_audio_record_wav},
         {"loopback",       lua_audio_loopback},
@@ -825,6 +947,7 @@ int luaopen_audio(lua_State *L)
         {"set_mute",       lua_audio_set_mute},
         {"set_gain",       lua_audio_set_gain},
         {"mic_read_level", lua_audio_mic_read_level},
+        {"read_spectrum",  lua_audio_read_spectrum},
         {NULL, NULL},
     };
     if (luaL_newmetatable(L, AUDIO_HANDLE_METATABLE)) {
