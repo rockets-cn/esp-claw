@@ -914,8 +914,8 @@ esp_err_t cap_scheduler_add(const cap_scheduler_item_t *item)
 
 esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
 {
-    cap_scheduler_entry_t previous_entry;
-    cap_scheduler_item_t normalized_item;
+    cap_scheduler_entry_t *previous_entry = NULL;
+    cap_scheduler_item_t *normalized_item = NULL;
     ssize_t index;
     esp_err_t err;
     int64_t now_ms = cap_scheduler_now_ms();
@@ -924,31 +924,45 @@ esp_err_t cap_scheduler_update(const cap_scheduler_item_t *item)
         return ESP_ERR_INVALID_STATE;
     }
 
-    normalized_item = *item;
-    cap_scheduler_apply_defaults(&normalized_item);
-    if (cap_scheduler_validate_item(&normalized_item) != ESP_OK) {
-        return ESP_ERR_INVALID_ARG;
+    normalized_item = calloc(1, sizeof(*normalized_item));
+    previous_entry = calloc(1, sizeof(*previous_entry));
+    if (!normalized_item || !previous_entry) {
+        err = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+
+    *normalized_item = *item;
+    cap_scheduler_apply_defaults(normalized_item);
+    if (cap_scheduler_validate_item(normalized_item) != ESP_OK) {
+        err = ESP_ERR_INVALID_ARG;
+        goto cleanup;
     }
 
     cap_scheduler_lock();
-    index = cap_scheduler_find_entry_index_locked(normalized_item.id);
+    index = cap_scheduler_find_entry_index_locked(normalized_item->id);
     if (index < 0) {
         cap_scheduler_unlock();
-        return ESP_ERR_NOT_FOUND;
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
     }
-    previous_entry = s_cap_scheduler.entries[index];
-    s_cap_scheduler.entries[index].item = normalized_item;
+    *previous_entry = s_cap_scheduler.entries[index];
+    s_cap_scheduler.entries[index].item = *normalized_item;
     if (s_cap_scheduler.entries[index].status != CAP_SCHEDULER_STATUS_PAUSED) {
         cap_scheduler_refresh_entry_locked(&s_cap_scheduler.entries[index], now_ms);
     }
     err = cap_scheduler_persist_all_locked();
     if (err != ESP_OK) {
-        s_cap_scheduler.entries[index] = previous_entry;
+        s_cap_scheduler.entries[index] = *previous_entry;
         cap_scheduler_unlock();
-        return err;
+        goto cleanup;
     }
     cap_scheduler_unlock();
-    return ESP_OK;
+    err = ESP_OK;
+
+cleanup:
+    free(previous_entry);
+    free(normalized_item);
+    return err;
 }
 
 esp_err_t cap_scheduler_remove(const char *id)
