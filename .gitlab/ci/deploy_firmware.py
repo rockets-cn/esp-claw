@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+# SPDX-License-Identifier: Apache-2.0
 """
 Deploy firmware artifacts to the download server.
 
@@ -13,41 +15,41 @@ import sys
 import zipfile
 from pathlib import Path
 
-ARCHIVE_NAME = "esp-claw-firmware.zip"
+ARCHIVE_NAME = 'esp-claw-firmware.zip'
 
 
 def build_archive() -> Path:
     archive_path = Path(ARCHIVE_NAME)
-    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        firmware_json = Path("firmware.json")
+    with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        firmware_json = Path('firmware.json')
         if firmware_json.exists():
             zf.write(firmware_json, firmware_json.name)
             print(f"  added: {firmware_json}")
         else:
-            print("WARNING: firmware.json not found, skipping.", file=sys.stderr)
+            print('WARNING: firmware.json not found, skipping.', file=sys.stderr)
 
-        merged_binary = Path("merged_binary")
+        merged_binary = Path('merged_binary')
         if merged_binary.exists():
-            for file in sorted(merged_binary.rglob("*")):
+            for file in sorted(merged_binary.rglob('*')):
                 if file.is_file():
                     zf.write(file, file.as_posix())
                     print(f"  added: {file}")
         else:
-            print("WARNING: merged_binary/ directory not found, skipping.", file=sys.stderr)
+            print('WARNING: merged_binary/ directory not found, skipping.', file=sys.stderr)
 
     print(f"Archive created: {archive_path} ({archive_path.stat().st_size} bytes)")
     return archive_path
 
 
 def upload_archive(archive_path: Path) -> None:
-    upload_key = os.environ.get("DL_UPLOAD_KEY")
-    upload_api_url = os.environ.get("DL_UPLOAD_API_URL")
-    upload_path = os.environ.get("DL_UPLOAD_PATH")
+    upload_key = os.environ.get('DL_UPLOAD_KEY')
+    upload_api_url = os.environ.get('DL_UPLOAD_API_URL')
+    upload_path = os.environ.get('DL_UPLOAD_PATH')
 
     missing = [var for var, val in [
-        ("DL_UPLOAD_KEY", upload_key),
-        ("DL_UPLOAD_API_URL", upload_api_url),
-        ("DL_UPLOAD_PATH", upload_path),
+        ('DL_UPLOAD_KEY', upload_key),
+        ('DL_UPLOAD_API_URL', upload_api_url),
+        ('DL_UPLOAD_PATH', upload_path),
     ] if not val]
 
     if missing:
@@ -55,11 +57,11 @@ def upload_archive(archive_path: Path) -> None:
         sys.exit(1)
 
     cmd = [
-        "curl",
-        "--fail",
-        "-u", upload_key,
-        "-F", f"file=@{archive_path}",
-        "-F", f"path={upload_path}",
+        'curl',
+        '--fail',
+        '-u', upload_key,
+        '-F', f"file=@{archive_path}",
+        '-F', f"path={upload_path}",
         upload_api_url,
     ]
 
@@ -69,20 +71,20 @@ def upload_archive(archive_path: Path) -> None:
         print(f"ERROR: Upload failed with exit code {result.returncode}", file=sys.stderr)
         sys.exit(result.returncode)
 
-    print("Upload succeeded.")
+    print('Upload succeeded.')
 
 
 def main() -> None:
-    deploy_firmware = os.environ.get("DEPLOY_FIRMWARE", "0")
+    deploy_firmware = os.environ.get('DEPLOY_FIRMWARE', '0')
 
-    if deploy_firmware != "1":
+    if deploy_firmware != '1':
         print(f"DEPLOY_FIRMWARE={deploy_firmware!r}: skipping firmware deployment.")
         sys.exit(0)
 
-    print("DEPLOY_FIRMWARE=1: packaging and uploading firmware artifacts ...")
+    print('DEPLOY_FIRMWARE=1: packaging and uploading firmware artifacts ...')
     archive_path = build_archive()
     upload_archive(archive_path)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

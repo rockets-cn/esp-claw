@@ -15,6 +15,9 @@ dependencies:
   espressif2022/esp_emote_expression:
     version: "^1.0.0"
 
+  espressif2022/esp_emote_gfx:
+    version: "3.0.2"
+
   cap_cli:
     path: ../../../components/claw_capabilities/cap_cli
 
