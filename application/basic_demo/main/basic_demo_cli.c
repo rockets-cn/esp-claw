@@ -26,6 +26,7 @@
 #include "claw_event_publisher.h"
 #include "claw_event_router.h"
 #include "cJSON.h"
+#include "esp_check.h"
 #include "esp_console.h"
 #include "esp_log.h"
 
@@ -665,6 +666,7 @@ esp_err_t basic_demo_cli_start(void)
 {
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    esp_err_t err = ESP_OK;
 
     ESP_LOGI(TAG, "Starting console REPL");
 
@@ -674,14 +676,17 @@ esp_err_t basic_demo_cli_start(void)
 
 #if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
     esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_uart(&hw_config, &repl_config, &repl));
+    ESP_RETURN_ON_ERROR(esp_console_new_repl_uart(&hw_config, &repl_config, &repl),
+                        TAG, "Failed to create UART REPL");
 #elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     esp_console_dev_usb_serial_jtag_config_t hw_config =
         ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl));
+    ESP_RETURN_ON_ERROR(esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl),
+                        TAG, "Failed to create USB Serial/JTAG REPL");
 #elif CONFIG_ESP_CONSOLE_USB_CDC
     esp_console_dev_usb_cdc_config_t hw_config = ESP_CONSOLE_DEV_CDC_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_usb_cdc(&hw_config, &repl_config, &repl));
+    ESP_RETURN_ON_ERROR(esp_console_new_repl_usb_cdc(&hw_config, &repl_config, &repl),
+                        TAG, "Failed to create USB CDC REPL");
 #else
     ESP_LOGE(TAG, "No supported console backend is enabled");
     return ESP_ERR_NOT_SUPPORTED;
@@ -747,5 +752,9 @@ esp_err_t basic_demo_cli_start(void)
     }
 
     printf("Type 'help', 'auto rules', 'auto last', or 'auto emit_message qq_gateway qq 123 hello'\n");
-    return esp_console_start_repl(repl);
+    err = esp_console_start_repl(repl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start console REPL: %s", esp_err_to_name(err));
+    }
+    return err;
 }

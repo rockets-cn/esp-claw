@@ -1,7 +1,4 @@
-board: unihiker_k10
-chip: esp32s3
-version: '1.0.0'
-
+version: 1.0.0
 devices:
   - name: display_lcd
     chip: ili9341

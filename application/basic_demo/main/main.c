@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "app_claw.h"
-#if defined(CONFIG_BASIC_DEMO_ENABLE_EMOTE)
+#if defined(CONFIG_BASIC_DEMO_ENABLE_EMOTE) && defined(__has_include)
+#if __has_include("app_expression_emote.h")
 #include "app_expression_emote.h"
+#define BASIC_DEMO_HAS_EMOTE 1
+#endif
 #endif
 #include "basic_demo_settings.h"
 #include "basic_demo_wifi.h"
@@ -22,7 +25,7 @@
 #include "nvs_flash.h"
 #include "wear_levelling.h"
 #include "esp_board_manager_includes.h"
-#include "k10_display.h"
+#include "k10_extension.h"
 static const char *TAG = "basic_demo";
 static basic_demo_settings_t s_settings = {0};
 
@@ -75,7 +78,7 @@ static void on_wifi_state_changed(bool connected, void *user_ctx)
              basic_demo_wifi_get_mode_string(),
              ap_ssid ? ap_ssid : "(none)");
 
-#if defined(CONFIG_BASIC_DEMO_ENABLE_EMOTE)
+#if defined(BASIC_DEMO_HAS_EMOTE)
     esp_err_t err = app_expression_emote_set_status(connected, ap_ssid);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to update network emote: %s", esp_err_to_name(err));
@@ -193,7 +196,6 @@ static void memory_monitor_task(void *arg)
 
 void app_main(void)
 {
-    ESP_ERROR_CHECK(k10_display_init());
     esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
 
     ESP_LOGI(TAG, "Starting basic_demo");
@@ -202,7 +204,8 @@ void app_main(void)
     ESP_ERROR_CHECK(basic_demo_settings_load(&s_settings));
     init_timezone(s_settings.time_timezone); // no need to check error
     ESP_ERROR_CHECK(esp_board_manager_init());
-#if defined(CONFIG_BASIC_DEMO_ENABLE_EMOTE)
+    ESP_ERROR_CHECK(k10_extension_init());
+#if defined(BASIC_DEMO_HAS_EMOTE)
     ESP_ERROR_CHECK(app_expression_emote_start());
 #endif
     ESP_ERROR_CHECK(init_fatfs());

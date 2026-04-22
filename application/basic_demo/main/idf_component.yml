@@ -1,4 +1,6 @@
 dependencies:
   espressif/esp_lcd_ili9341: ~1.2.0
   espressif/esp_board_manager: '*'
+  espressif/esp_io_expander_tca95xx_16bit: ^2.0.0
   espressif/esp_lcd_touch: '*'
+  espressif/led_strip: ^3.0.3

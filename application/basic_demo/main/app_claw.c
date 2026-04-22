@@ -335,6 +335,7 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
         .session_builder = cap_session_mgr_build_session_id,
     };
     bool llm_enabled = false;
+    bool scheduler_enabled = false;
 
     if (!settings) {
         return ESP_ERR_INVALID_ARG;
@@ -347,17 +348,21 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
     router_config.rules_path = paths.router_rules_path;
     ESP_RETURN_ON_ERROR(cap_session_mgr_set_session_root_dir(paths.memory_session_root), TAG, "Failed to configure session manager");
     ESP_RETURN_ON_ERROR(claw_event_router_init(&router_config), TAG, "Failed to init event router");
-    ESP_RETURN_ON_ERROR(cap_scheduler_init(&(cap_scheduler_config_t){
-                            .schedules_path = paths.scheduler_rules_path,
-                            .tick_ms = 1000,
-                            .max_items = 32,
-                            .task_stack_size = 6144,
-                            .task_priority = 5,
-                            .task_core = tskNO_AFFINITY,
-                            .publish_event = claw_event_router_publish,
-                            .persist_after_fire = true,
-                        }),
-                        TAG, "Failed to init scheduler");
+    esp_err_t scheduler_err = cap_scheduler_init(&(cap_scheduler_config_t){
+                                .schedules_path = paths.scheduler_rules_path,
+                                .tick_ms = 1000,
+                                .max_items = 32,
+                                .task_stack_size = 6144,
+                                .task_priority = 5,
+                                .task_core = tskNO_AFFINITY,
+                                .publish_event = claw_event_router_publish,
+                                .persist_after_fire = true,
+                            });
+    if (scheduler_err != ESP_OK) {
+        ESP_LOGW(TAG, "Scheduler disabled because init failed: %s", esp_err_to_name(scheduler_err));
+    } else {
+        scheduler_enabled = true;
+    }
     ESP_RETURN_ON_ERROR(init_memory(settings, &paths), TAG, "Failed to init memory");
     ESP_RETURN_ON_ERROR(init_skills(&paths), TAG, "Failed to init skills");
     ESP_RETURN_ON_ERROR(init_capabilities(settings, &paths), TAG, "Failed to init capabilities");
@@ -423,8 +428,15 @@ esp_err_t app_claw_start(const basic_demo_settings_t *settings)
                             .on_sync_success = basic_demo_time_sync_success,
                         }),
                         TAG, "Failed to start time sync service");
-    ESP_RETURN_ON_ERROR(cap_scheduler_start(), TAG, "Failed to start scheduler");
-    ESP_RETURN_ON_ERROR(basic_demo_cli_start(), TAG, "Failed to start CLI");
+    if (scheduler_enabled) {
+        ESP_RETURN_ON_ERROR(cap_scheduler_start(), TAG, "Failed to start scheduler");
+    } else {
+        ESP_LOGW(TAG, "Scheduler start skipped because scheduler is unavailable");
+    }
+    esp_err_t cli_err = basic_demo_cli_start();
+    if (cli_err != ESP_OK) {
+        ESP_LOGW(TAG, "CLI disabled because init failed: %s", esp_err_to_name(cli_err));
+    }
 
     return ESP_OK;
 }
