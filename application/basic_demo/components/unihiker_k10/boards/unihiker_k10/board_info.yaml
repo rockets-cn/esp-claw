@@ -1,0 +1,5 @@
+board: unihiker_k10
+chip: esp32s3
+version: "1.0"
+description: "DFRobot UNIHIKER K10 - ESP32-S3 N16R8 AI Learning Board"
+manufacturer: "DFRobot"

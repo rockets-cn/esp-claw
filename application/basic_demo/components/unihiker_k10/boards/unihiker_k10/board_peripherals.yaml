@@ -1,0 +1,3 @@
+board: unihiker_k10
+chip: esp32s3
+version: '1.0.0'

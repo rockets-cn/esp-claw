@@ -1,0 +1,6 @@
+config BOARD_UNIHIKER_K10
+    bool "UNIHIKER K10 (DFRobot ESP32-S3 AI Board)"
+    depends on SOC_ESP32S3
+    help
+        UNIHIKER K10 with 2.8" ILI9341 LCD, GC2145 Camera,
+        dual mics, speaker, RGB LEDs, and onboard sensors.

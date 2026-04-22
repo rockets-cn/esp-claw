@@ -1,0 +1,59 @@
+board: unihiker_k10
+chip: esp32s3
+version: '1.0.0'
+
+devices:
+  - name: display_lcd
+    type: custom
+    init_skip: false
+    config:
+      driver: ili9341
+
+  - name: fs_spiffs
+    type: fs_spiffs
+    config:
+      base_path: "/spiffs"
+      partition_label: "storage"
+      max_files: 5
+
+  - name: rgb_led
+    type: custom
+    init_skip: false
+    config:
+      driver: ws2812
+
+  - name: xl9535
+    type: custom
+    init_skip: false
+    config:
+      driver: tca9555
+
+  - name: camera_gc2145
+    type: custom
+    init_skip: false
+    config:
+      driver: gc2145_dvp
+
+  - name: aht20
+    type: custom
+    init_skip: false
+    config:
+      driver: aht20
+
+  - name: ltr303
+    type: custom
+    init_skip: false
+    config:
+      driver: ltr303als
+
+  - name: sc7a20h
+    type: custom
+    init_skip: false
+    config:
+      driver: sc7a20h
+
+  - name: audio_codec
+    type: custom
+    init_skip: false
+    config:
+      driver: es8311_es7243e

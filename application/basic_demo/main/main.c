@@ -22,7 +22,7 @@
 #include "nvs_flash.h"
 #include "wear_levelling.h"
 #include "esp_board_manager_includes.h"
-
+#include "k10_display.h"
 static const char *TAG = "basic_demo";
 static basic_demo_settings_t s_settings = {0};
 
@@ -193,6 +193,7 @@ static void memory_monitor_task(void *arg)
 
 void app_main(void)
 {
+    ESP_ERROR_CHECK(k10_display_init());
     esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
 
     ESP_LOGI(TAG, "Starting basic_demo");

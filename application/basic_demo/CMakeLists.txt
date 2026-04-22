@@ -3,6 +3,12 @@ cmake_minimum_required(VERSION 3.16)
 include("${CMAKE_SOURCE_DIR}/tools/cmake/esp_idf_patch.cmake")
 include("${CMAKE_SOURCE_DIR}/tools/cmake/flash_partition_defaults.cmake")
 
+set(EXTRA_COMPONENT_DIRS 
+    "${CMAKE_SOURCE_DIR}/../../components/claw_capabilities"
+    "${CMAKE_SOURCE_DIR}/../../components/claw_modules"
+    "${CMAKE_SOURCE_DIR}/../../components/lua_modules"
+)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(basic_demo)
 include("${CMAKE_SOURCE_DIR}/tools/cmake/board_manager_patch.cmake")
