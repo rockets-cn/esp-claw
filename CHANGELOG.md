@@ -10,6 +10,14 @@
 
 * Added ADC Lua module: Introduced ADC channel creation, reading, and closing operations, with a basic demo script.
 
+* Added file copy and move operations to `cap_files`, including automatic parent directory creation and rename fallback when direct moves are not available.
+
+* Reworked `cap_time` to use SNTP-based synchronization, added on-demand current time retrieval, and injected a time context provider for relative date reasoning in `claw_core`.
+
+### Fix:
+
+* Cleared context outputs before collection across Lua jobs, tool catalogs, memory providers, and skill prompts so failed collection paths do not leak stale content.
+
 ## 2026-04-21
 
 ### Refactor:
