@@ -9,6 +9,8 @@
   
 * Raised the Edge Agent tool iteration limit to 32 for longer multi-step interactions.
 
+* Updated Claw memory Session History collection to size its JSON buffer from retained session records instead of worst-case configuration limits, reducing unnecessary heap usage for short histories.
+
 ### Feature:
 
 * Refactored the Web Config interface:
