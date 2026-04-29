@@ -16,6 +16,14 @@
 
 * Enhanced CI board builds to support optional brand-specific board paths, emit `board_brand` in merged binary metadata, and append ESP32-P4 revision suffixes to generated merged binary artifacts while recording `rev` in the output JSON.
 
+* Increased the Claw capability tool result buffer to 32 KB so larger tool responses can be returned. Updated `cap_files` file reads to reject oversized files before reading and return an explicit error when the file exceeds the max read limit.
+  
+* Increased Claw memory session message buffers to 4096 chars.
+  
+* Raised the Edge Agent tool iteration limit to 32 for longer multi-step interactions.
+
+* Updated Claw memory Session History collection to size its JSON buffer from retained session records instead of worst-case configuration limits, reducing unnecessary heap usage for short histories.
+
 * Added the `edge_agent` demo application with Wi-Fi setup, HTTP management UI, FATFS image content, Lua script examples, skill assets, router rules, scheduler rules, and partition defaults.
 
 * Added shared application components for Claw capability wiring, CLI support, Lua module registration, captive DNS, display arbitration, emote rendering, settings storage, and Wi-Fi management.
