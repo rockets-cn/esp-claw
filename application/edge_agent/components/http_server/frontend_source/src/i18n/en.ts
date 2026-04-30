@@ -81,6 +81,8 @@ export const en = {
   llmModel: 'Model',
   llmTimeout: 'Timeout (ms)',
   llmTimeoutPlaceholder: '120000',
+  llmMaxTokens: 'Max Tokens',
+  llmMaxTokensPlaceholder: '8192',
   llmAdvanced: 'LLM Advanced Options',
   llmBackend: 'Backend Type',
   llmBackendPlaceholder: 'openai_compatible / anthropic / custom',
@@ -92,6 +94,7 @@ export const en = {
   llmAuthType: 'Auth Type',
   llmAuthTypePlaceholder: 'bearer / api-key / none',
   llmValidationRequiredFields: 'Complete required LLM fields before saving: {fields}.',
+  llmValidationMaxTokens: 'Max Tokens must be a positive integer.',
 
   sectionIm: 'Instant Messaging (IM)',
   imAdd: 'Add',

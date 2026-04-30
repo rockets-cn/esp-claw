@@ -18,6 +18,8 @@
 
 * Added shared `app_claw` support for `lua_module_knob`, including Kconfig and dependency wiring, Lua module registration, a basic rotary encoder demo script, and the related skill metadata.
 
+* Make max tokens configurable
+
 ### Change:
 
 * Removed the deprecated `application/basic_demo` app and its CI/build rules.

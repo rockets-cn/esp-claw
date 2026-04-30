@@ -8,6 +8,7 @@ export type AppConfig = {
   llm_base_url: string;
   llm_auth_type: string;
   llm_timeout_ms: string;
+  llm_max_tokens: string;
   qq_app_id: string;
   qq_app_secret: string;
   feishu_app_id: string;
@@ -46,6 +47,7 @@ export const GROUP_FIELDS: Record<ConfigGroup, (keyof AppConfig)[]> = {
     'llm_base_url',
     'llm_auth_type',
     'llm_timeout_ms',
+    'llm_max_tokens',
   ],
   im: [
     'qq_app_id',

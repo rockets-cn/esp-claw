@@ -78,6 +78,8 @@ export const zhCn: Dict = {
   llmModel: '模型',
   llmTimeout: '超时 (毫秒)',
   llmTimeoutPlaceholder: '120000',
+  llmMaxTokens: '最大 Token 数',
+  llmMaxTokensPlaceholder: '8192',
   llmAdvanced: 'LLM 高级选项',
   llmBackend: '后端类型',
   llmBackendPlaceholder: 'openai_compatible / anthropic / custom',
@@ -89,6 +91,7 @@ export const zhCn: Dict = {
   llmAuthType: '认证类型',
   llmAuthTypePlaceholder: 'bearer / api-key / none',
   llmValidationRequiredFields: '保存前请补全 LLM 必填项：{fields}。',
+  llmValidationMaxTokens: '最大 Token 数必须是正整数。',
 
   sectionIm: '即时通讯 (IM)',
   imAdd: '添加',
