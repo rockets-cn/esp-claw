@@ -806,47 +806,51 @@ static esp_err_t append_tool_array_json(cJSON *tools, const char *json_text)
 
 static char *build_current_turn_prompt(const claw_core_request_t *request)
 {
-    size_t total_len;
+#define CLAW_CORE_TURN_PROMPT_FMT \
+    "## Current Turn Context\n" \
+    "- request_id: %" PRIu32 "\n" \
+    "- source_cap: %s\n" \
+    "- source_channel: %s\n" \
+    "- source_chat_id: %s\n" \
+    "- source_sender_id: %s\n" \
+    "- source_message_id: %s\n"
+#define CLAW_CORE_TURN_PROMPT_ARGS(req) \
+    (req)->request_id, \
+    (req)->source_cap ? (req)->source_cap : "(unknown)", \
+    (req)->source_channel ? (req)->source_channel : "(unknown)", \
+    (req)->source_chat_id ? (req)->source_chat_id : "(unknown)", \
+    (req)->source_sender_id ? (req)->source_sender_id : "(unknown)", \
+    (req)->source_message_id ? (req)->source_message_id : "(none)"
+
+    int needed;
     char *text = NULL;
 
     if (!request) {
-        return NULL;
+        text = NULL;
+        goto cleanup;
     }
 
-    static const char *k_behavior_note =
-        "The agent result will be automatically sent to the user. "
-        "so it is generally not need to activate cap_im_xx to return messages.\n";
+    needed = snprintf(NULL, 0, CLAW_CORE_TURN_PROMPT_FMT, CLAW_CORE_TURN_PROMPT_ARGS(request));
+    if (needed < 0) {
+        ESP_LOGE(TAG, "failed to size current turn prompt");
+        text = NULL;
+        goto cleanup;
+    }
 
-    total_len = 256 + strlen(k_behavior_note);
-    total_len += request->source_cap ? strlen(request->source_cap) : 0;
-    total_len += request->source_channel ? strlen(request->source_channel) : 0;
-    total_len += request->source_chat_id ? strlen(request->source_chat_id) : 0;
-    total_len += request->source_sender_id ? strlen(request->source_sender_id) : 0;
-    total_len += request->source_message_id ? strlen(request->source_message_id) : 0;
-
-    text = calloc(1, total_len);
+    text = calloc(1, (size_t)needed + 1);
     if (!text) {
-        return NULL;
+        goto cleanup;
     }
 
-    snprintf(text,
-             total_len,
-             "## Current Turn Context\n"
-             "- request_id: %" PRIu32 "\n"
-             "- source_cap: %s\n"
-             "- source_channel: %s\n"
-             "- source_chat_id: %s\n"
-             "- source_sender_id: %s\n"
-             "- source_message_id: %s\n"
-             "\n## Behavior Notes\n"
-             "%s",
-             request->request_id,
-             request->source_cap ? request->source_cap : "(unknown)",
-             request->source_channel ? request->source_channel : "(unknown)",
-             request->source_chat_id ? request->source_chat_id : "(unknown)",
-             request->source_sender_id ? request->source_sender_id : "(unknown)",
-             request->source_message_id ? request->source_message_id : "(none)",
-             k_behavior_note);
+    if (snprintf(text, (size_t)needed + 1, CLAW_CORE_TURN_PROMPT_FMT, CLAW_CORE_TURN_PROMPT_ARGS(request)) < 0) {
+        ESP_LOGE(TAG, "failed to build current turn prompt");
+        free(text);
+        text = NULL;
+    }
+
+cleanup:
+#undef CLAW_CORE_TURN_PROMPT_ARGS
+#undef CLAW_CORE_TURN_PROMPT_FMT
     return text;
 }
 
