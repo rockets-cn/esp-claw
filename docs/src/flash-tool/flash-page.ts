@@ -1,5 +1,8 @@
 import { connect, connectWithPort, type ESPLoader, type Logger } from "tasmota-webserial-esptool";
 
+const FLASH_UART_BAUD_FAST = 921600; // UART speed during stub flash
+const FLASH_UART_BAUD_ROM = 115200; // ROM / console default
+
 type FirmwareRecord = {
   description?: string;
   merged_binary: string;
@@ -903,9 +906,20 @@ async function flashSelectedFirmware() {
     updateModalProgress(s.writingFlash, 0);
     addProgressLine(`Flashing ${selected.boardKey} from 0x0`);
 
+    const loader = state.loader;
+    let fastBaudForFlash = false;
+    if (loader.IS_STUB) {
+      try {
+        await loader.setBaudrate(FLASH_UART_BAUD_FAST);
+        fastBaudForFlash = true;
+      } catch (baudErr) {
+        addProgressLine(`UART speed-up skipped: ${getErrorMessage(baudErr)}`);
+      }
+    }
+
     let lastWritePct = 0;
     try {
-      await state.loader.flashData(binary, (written, total) => {
+      await loader.flashData(binary, (written, total) => {
         const pct = total > 0 ? Math.round((written / total) * 100) : 0;
         lastWritePct = pct;
         updateModalProgress(s.writingFlash, pct);
@@ -925,6 +939,14 @@ async function flashSelectedFirmware() {
       }
       addProgressLine("Note: stub finalization timed out after write; continuing with hardware reset.");
       updateModalProgress(s.writingFlash, 100);
+    } finally {
+      if (fastBaudForFlash && loader.IS_STUB) {
+        try {
+          await loader.setBaudrate(FLASH_UART_BAUD_ROM);
+        } catch (restoreErr) {
+          addProgressLine(`UART restore to ${FLASH_UART_BAUD_ROM} failed: ${getErrorMessage(restoreErr)}`);
+        }
+      }
     }
 
     state.flash = "flashed";
