@@ -5,7 +5,6 @@ include("${CMAKE_SOURCE_DIR}/tools/cmake/flash_partition_defaults.cmake")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(edge_agent)
-include("${CMAKE_SOURCE_DIR}/tools/cmake/board_manager_patch.cmake")
 
 fatfs_create_spiflash_image(storage fatfs_image FLASH_IN_PROJECT)
 
