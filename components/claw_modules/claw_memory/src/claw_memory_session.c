@@ -6,7 +6,6 @@
 #include "claw_memory_internal.h"
 #include "claw_task.h"
 
-#include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -18,6 +17,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "mbedtls/base64.h"
 
 static const char *TAG = "claw_memory";
 
@@ -76,14 +76,17 @@ typedef struct {
     uint32_t max_slots;
     uint32_t total_records;
     claw_memory_session_index_entry_t entries[CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES];
-    uint8_t reserved[CLAW_MEMORY_SESSION_HEADER_SIZE -
+    uint8_t reserved[CLAW_MEMORY_SESSION_RAW_HEADER_SIZE -
                      (sizeof(uint32_t) * 4) -
                      (sizeof(claw_memory_session_index_entry_t) *
                       CLAW_MEMORY_DEFAULT_MAX_SESSION_MESSAGES)];
 } claw_memory_session_header_t;
 
-_Static_assert(sizeof(claw_memory_session_header_t) == CLAW_MEMORY_SESSION_HEADER_SIZE,
-               "session history header size must remain fixed");
+_Static_assert(sizeof(claw_memory_session_header_t) == CLAW_MEMORY_SESSION_RAW_HEADER_SIZE,
+               "session history raw header size must remain fixed");
+_Static_assert(CLAW_MEMORY_SESSION_HEADER_SIZE ==
+               (((CLAW_MEMORY_SESSION_RAW_HEADER_SIZE + 2) / 3) * 4) + 1,
+               "session history file header must fit base64 header plus newline");
 
 static claw_memory_pending_summary_t *claw_memory_find_pending_summary(const char *session_id)
 {
@@ -623,7 +626,10 @@ static bool session_history_header_valid(const claw_memory_session_header_t *hea
 static esp_err_t session_history_read_header(FILE *file,
                                              claw_memory_session_header_t *header)
 {
+    unsigned char encoded[CLAW_MEMORY_SESSION_HEADER_SIZE];
+    size_t decoded_len = 0;
     size_t read_len;
+    int ret;
 
     if (!file || !header) {
         return ESP_ERR_INVALID_ARG;
@@ -634,8 +640,8 @@ static esp_err_t session_history_read_header(FILE *file,
     }
 
     memset(header, 0, sizeof(*header));
-    read_len = fread(header, 1, sizeof(*header), file);
-    if (read_len != sizeof(*header)) {
+    read_len = fread(encoded, 1, CLAW_MEMORY_SESSION_HEADER_SIZE, file);
+    if (read_len != CLAW_MEMORY_SESSION_HEADER_SIZE) {
         if (ferror(file)) {
             ESP_LOGE(TAG, "read session history header failed");
             return ESP_FAIL;
@@ -643,7 +649,21 @@ static esp_err_t session_history_read_header(FILE *file,
         ESP_LOGW(TAG,
                  "Session history header is missing or short (%u/%u bytes)",
                  (unsigned)read_len,
-                 (unsigned)sizeof(*header));
+                 (unsigned)CLAW_MEMORY_SESSION_HEADER_SIZE);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (encoded[CLAW_MEMORY_SESSION_HEADER_SIZE - 1] != '\n') {
+        ESP_LOGW(TAG, "Session history base64 header separator missing");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ret = mbedtls_base64_decode((unsigned char *)header,
+                                sizeof(*header),
+                                &decoded_len,
+                                encoded,
+                                CLAW_MEMORY_SESSION_HEADER_SIZE - 1);
+    if (ret != 0 || decoded_len != sizeof(*header)) {
+        ESP_LOGW(TAG, "Invalid session history base64 header");
         return ESP_ERR_INVALID_STATE;
     }
     if (!session_history_header_valid(header)) {
@@ -655,14 +675,32 @@ static esp_err_t session_history_read_header(FILE *file,
 static esp_err_t session_history_write_header(FILE *file,
                                               const claw_memory_session_header_t *header)
 {
+    unsigned char encoded[CLAW_MEMORY_SESSION_HEADER_SIZE];
+    size_t encoded_len = 0;
+
     if (!file || !header) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!session_history_header_valid(header)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (mbedtls_base64_encode(encoded,
+                              sizeof(encoded),
+                              &encoded_len,
+                              (const unsigned char *)header,
+                              sizeof(*header)) != 0 ||
+            encoded_len != CLAW_MEMORY_SESSION_HEADER_SIZE - 1) {
+        ESP_LOGE(TAG, "encode session history header failed");
+        return ESP_FAIL;
+    }
+    encoded[encoded_len] = '\n';
+
     if (fseek(file, 0, SEEK_SET) != 0) {
         ESP_LOGE(TAG, "seek session history header for write failed");
         return ESP_FAIL;
     }
-    if (fwrite(header, 1, sizeof(*header), file) != sizeof(*header)) {
+    if (fwrite(encoded, 1, sizeof(encoded), file) != sizeof(encoded)) {
         ESP_LOGE(TAG, "write session history header failed");
         return ESP_FAIL;
     }
@@ -890,11 +928,6 @@ static esp_err_t session_history_recreate_file(const char *path,
     if (err != ESP_OK) {
         fclose(file);
         return err;
-    }
-    if (fputc('\n', file) == EOF) {
-        ESP_LOGE(TAG, "write session history header separator failed");
-        fclose(file);
-        return ESP_FAIL;
     }
 
     *out_file = file;

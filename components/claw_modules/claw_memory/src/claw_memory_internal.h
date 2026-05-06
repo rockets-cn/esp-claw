@@ -33,8 +33,9 @@
 #define CLAW_MEMORY_USER_FILE                    "user.md"
 #define CLAW_MEMORY_AUTO_EXTRACT_MAX_ITEMS       3
 #define CLAW_MEMORY_SESSION_HEADER_MAGIC         0x31485343u /* CSH1 */
-#define CLAW_MEMORY_SESSION_HEADER_VERSION       1
-#define CLAW_MEMORY_SESSION_HEADER_SIZE          256
+#define CLAW_MEMORY_SESSION_HEADER_VERSION       2
+#define CLAW_MEMORY_SESSION_RAW_HEADER_SIZE      256
+#define CLAW_MEMORY_SESSION_HEADER_SIZE          345
 
 typedef struct {
     int initialized;
