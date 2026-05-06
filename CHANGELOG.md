@@ -19,6 +19,10 @@
 
 * Adjusted `cap_im_qq` HTTP TX buffer sizing when HTTP reuse is enabled so reused clients keep compatible buffer settings.
 
+### Feature:
+
+* Added an indexed session history file header for Claw memory sessions to retain recent records by offset and rebuild session JSON without scanning legacy tab-delimited lines.
+
 ## 2026-05-03
 
 ### Fix:
@@ -60,6 +64,7 @@
 * Enhanced the Edge Agent web chat experience with local chat session persistence, file upload support, richer status and restart feedback, and updated configuration editing UI.
 
 * Refactored the docs online flashing workflow with a redesigned multi-step flash page, refreshed localized copy, and updated firmware metadata generation for the new tool flow.
+
 
 ### Change:
 
