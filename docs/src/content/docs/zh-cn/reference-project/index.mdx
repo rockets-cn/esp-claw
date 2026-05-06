@@ -90,12 +90,12 @@ import ClawRunDiagram from "@/assets/images/claw_run.svg?url";
     - soul.md 人设
     - identity.md 身份
   - skills/
-    - skills_list.json Skills 清单（id、file、summary、cap_groups）
-    - *.md 各 Skill 文档
+    - skill_id/
+      - SKILL.md Skill 元数据与正文
+      - scripts/ Skill 自带脚本（可选）
   - scripts/
-    - hello.lua 出厂示例脚本
-    - audio_fft_2.lua 音频采集与频谱分析示例
-    - mcpwm_servo.lua 舵机 PWM 控制示例
+    - builtin/ 内置 Lua 测试脚本与库
+    - docs/ 内置 Lua 模块文档
     - *.lua 自定义 Lua 脚本
   - router_rules/
     - router_rules.json 自动化规则

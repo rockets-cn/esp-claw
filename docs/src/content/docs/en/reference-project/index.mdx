@@ -90,12 +90,12 @@ All runtime data lives under the FATFS mount `/fatfs`:
     - soul.md Persona
     - identity.md Identity
   - skills/
-    - skills_list.json Skills manifest (id, file, summary, cap_groups)
-    - *.md Skill documents
+    - skill_id/
+      - SKILL.md Skill metadata and body
+      - scripts/ Skill-bundled scripts (optional)
   - scripts/
-    - hello.lua Factory sample script
-    - audio_fft_2.lua Audio capture and spectrum-analysis sample
-    - mcpwm_servo.lua Servo PWM control sample
+    - builtin/ Built-in Lua test scripts and libraries
+    - docs/ Built-in Lua module docs
     - *.lua Custom Lua scripts
   - router_rules/
     - router_rules.json Automation rules
