@@ -1,5 +1,11 @@
 # ChangeLog
 
+## 2026-05-06
+
+### Fix:
+
+* Improved file descriptor management for WebSocket connections to reduce the issue where Web Chat did not receive reply messages. (https://github.com/espressif/esp-claw/issues/36)
+
 ## 2026-05-03
 
 ### Fix:
