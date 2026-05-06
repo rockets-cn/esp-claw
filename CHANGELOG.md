@@ -5,6 +5,19 @@
 ### Fix:
 
 * Improved file descriptor management for WebSocket connections to reduce the issue where Web Chat did not receive reply messages. (https://github.com/espressif/esp-claw/issues/36)
+### Feature:
+
+* Added a shared `http_reuse` component that wraps `esp_http_client_init`, `esp_http_client_cleanup`, and `esp_http_client_perform` to transparently reuse persistent HTTP clients across requests to the same endpoint.
+
+* Added Kconfig options for HTTP client reuse, including feature enablement and configurable pool sizing.
+
+* Added pooled client LRU eviction and one-time retry-on-failure handling for reused connections to reduce repeated connection setup and improve robustness.
+
+* Wired `http_reuse` into `claw_core`, `cap_mcp_client`, `cap_web_search`, `cap_im_attachment`, `cap_im_feishu`, `cap_im_qq`, `cap_im_tg`, and `cap_im_wechat`.
+
+### Fix:
+
+* Adjusted `cap_im_qq` HTTP TX buffer sizing when HTTP reuse is enabled so reused clients keep compatible buffer settings.
 
 ## 2026-05-03
 
