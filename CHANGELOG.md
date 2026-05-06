@@ -26,6 +26,8 @@
 
 * Adjusted `cap_im_qq` HTTP TX buffer sizing when HTTP reuse is enabled so reused clients keep compatible buffer settings.
 
+* Fixed Feishu inbound image attachment saving to derive file extensions from the downloaded MIME type instead of assuming JPEG. 
+
 ## 2026-05-03
 
 ### Fix:
