@@ -834,6 +834,55 @@ static esp_err_t session_history_close_file(FILE *file)
     return ESP_OK;
 }
 
+static esp_err_t session_history_recreate_file(const char *path,
+                                               FILE **out_file,
+                                               claw_memory_session_header_t *header)
+{
+    FILE *file = NULL;
+    esp_err_t err;
+
+    if (!path || !out_file || !header) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    file = fopen(path, "w+b");
+    if (!file) {
+        ESP_LOGE(TAG, "create session history %s failed: errno=%d", path, errno);
+        return ESP_FAIL;
+    }
+
+    session_history_header_init(header, session_history_effective_max_slots());
+    err = session_history_write_header(file, header);
+    if (err != ESP_OK) {
+        fclose(file);
+        return err;
+    }
+
+    *out_file = file;
+    return ESP_OK;
+}
+
+static esp_err_t session_history_validate_json_array(const char *json)
+{
+    cJSON *root = NULL;
+
+    if (!json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    root = cJSON_ParseWithOpts(json, NULL, 1);
+    if (!root) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 static esp_err_t claw_memory_session_load_json_alloc(const char *session_id, char **out_json)
 {
     char *path = NULL;
@@ -843,6 +892,8 @@ static esp_err_t claw_memory_session_load_json_alloc(const char *session_id, cha
     size_t count = 0;
     size_t json_size = 0;
     esp_err_t err;
+    bool reset_file = false;
+    const char *reset_reason = NULL;
 
     if (!session_id || !out_json) {
         return ESP_ERR_INVALID_ARG;
@@ -869,16 +920,20 @@ static esp_err_t claw_memory_session_load_json_alloc(const char *session_id, cha
     }
 
     err = session_history_read_header(file, &header);
-    if (err == ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "Ignoring legacy or invalid session history file %s", path);
-        err = ESP_ERR_NOT_FOUND;
-        goto cleanup;
-    }
     if (err != ESP_OK) {
+        reset_file = true;
+        reset_reason = "invalid header";
+        err = ESP_ERR_NOT_FOUND;
         goto cleanup;
     }
 
     err = session_history_measure_indexed(&header, &count, &json_size);
+    if (err == ESP_ERR_INVALID_STATE) {
+        reset_file = true;
+        reset_reason = "invalid index";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
     if (err != ESP_OK) {
         goto cleanup;
     }
@@ -891,10 +946,41 @@ static esp_err_t claw_memory_session_load_json_alloc(const char *session_id, cha
     }
 
     err = session_history_render_indexed_json(file, &header, count, json, json_size);
+    if (err != ESP_OK) {
+        reset_file = true;
+        reset_reason = "read indexed records failed";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
+
+    err = session_history_validate_json_array(json);
+    if (err != ESP_OK) {
+        reset_file = true;
+        reset_reason = "invalid rendered json";
+        err = ESP_ERR_NOT_FOUND;
+        goto cleanup;
+    }
 
 cleanup:
     if (file && session_history_close_file(file) != ESP_OK && err == ESP_OK) {
         err = ESP_FAIL;
+    }
+    if (reset_file && path) {
+        FILE *reset_file_handle = NULL;
+        claw_memory_session_header_t reset_header;
+        esp_err_t reset_err;
+
+        ESP_LOGW(TAG, "Resetting session history %s: %s", path, reset_reason);
+        reset_err = session_history_recreate_file(path, &reset_file_handle, &reset_header);
+        if (reset_err == ESP_OK) {
+            reset_err = session_history_close_file(reset_file_handle);
+        }
+        if (reset_err != ESP_OK) {
+            ESP_LOGE(TAG, "reset session history %s failed: %s",
+                     path,
+                     esp_err_to_name(reset_err));
+            err = reset_err;
+        }
     }
     free(path);
     if (err != ESP_OK) {
@@ -903,34 +989,6 @@ cleanup:
     }
 
     *out_json = json;
-    return ESP_OK;
-}
-
-static esp_err_t session_history_recreate_file(const char *path,
-                                               FILE **out_file,
-                                               claw_memory_session_header_t *header)
-{
-    FILE *file = NULL;
-    esp_err_t err;
-
-    if (!path || !out_file || !header) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    file = fopen(path, "w+b");
-    if (!file) {
-        ESP_LOGE(TAG, "create session history %s failed: errno=%d", path, errno);
-        return ESP_FAIL;
-    }
-
-    session_history_header_init(header, session_history_effective_max_slots());
-    err = session_history_write_header(file, header);
-    if (err != ESP_OK) {
-        fclose(file);
-        return err;
-    }
-
-    *out_file = file;
     return ESP_OK;
 }
 
