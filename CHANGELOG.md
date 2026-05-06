@@ -2,10 +2,13 @@
 
 ## 2026-05-06
 
-### Fix:
-
-* Improved file descriptor management for WebSocket connections to reduce the issue where Web Chat did not receive reply messages. (https://github.com/espressif/esp-claw/issues/36)
 ### Feature:
+
+* Merged DHT-family single-wire sensor support into `lua_module_environmental_sensor`, allowing the same module to drive both BME690 (I2C) and DHT11/DHT22/AM2301/AM2302/AM2321/SI7021 sensors via separate Kconfig backends.
+
+* Added MPU6050 chip support to `lua_module_imu`, including a standalone MPU6050 driver (`mpu6050.c`), configurable SDO pin level for I2C address selection, and accelerometer/gyroscope read APIs.
+
+* Reorganized `lua_module_magnetometer` BMM350 driver sources into a dedicated `bmm350/` subdirectory for clearer module structure.
 
 * Added a shared `http_reuse` component that wraps `esp_http_client_init`, `esp_http_client_cleanup`, and `esp_http_client_perform` to transparently reuse persistent HTTP clients across requests to the same endpoint.
 
@@ -15,13 +18,13 @@
 
 * Wired `http_reuse` into `claw_core`, `cap_mcp_client`, `cap_web_search`, `cap_im_attachment`, `cap_im_feishu`, `cap_im_qq`, `cap_im_tg`, and `cap_im_wechat`.
 
+* Added an indexed session history file header for Claw memory sessions to retain recent records by offset and rebuild session JSON without scanning legacy tab-delimited lines.
+
 ### Fix:
 
+* Improved file descriptor management for WebSocket connections to reduce the issue where Web Chat did not receive reply messages. (https://github.com/espressif/esp-claw/issues/36)
+
 * Adjusted `cap_im_qq` HTTP TX buffer sizing when HTTP reuse is enabled so reused clients keep compatible buffer settings.
-
-### Feature:
-
-* Added an indexed session history file header for Claw memory sessions to retain recent records by offset and rebuild session JSON without scanning legacy tab-delimited lines.
 
 ## 2026-05-03
 
