@@ -1,7 +1,7 @@
 # Lua IMU
 
 This module describes how to read IMU data from Lua.
-When a request mentions `bmi270`, `imu`, `accelerometer`, or `gyroscope`, use this module by default.
+When a request mentions `bmi270`, `icm42670`, `mpu6050`, `imu`, `accelerometer`, or `gyroscope`, use this module by default.
 
 ## How to call
 - Import it with `local imu = require("imu")`
@@ -25,9 +25,10 @@ required fields will raise an error.
 |--------------|----------|---------------------------------------------------------------|
 | `device`     | string   | Board device name to read defaults from (default `imu_sensor`)|
 | `peripheral` | string   | Board I2C master peripheral name (e.g. `"i2c_master"`)        |
-| `i2c_addr`   | integer  | BMI270 7-bit I2C address (default `0x68`)                     |
+| `i2c_addr`   | integer  | Selected backend's 7-bit I2C address (default `0x68`)         |
 | `frequency`  | integer  | I2C clock in Hz (default `400000`)                            |
-| `int_gpio`   | integer  | GPIO number wired to BMI270 INT1                              |
+| `int_gpio`   | integer  | GPIO number wired to the sensor interrupt pin                 |
+| `sdo_gpio`   | integer  | Optional address-select pin; for MPU6050 it drives `AD0`      |
 
 ## Data format
 - `sample.accel.x`, `sample.accel.y`, `sample.accel.z`
