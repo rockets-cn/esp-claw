@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-        "src/lua_module_touch.c"
+        "src/lua_driver_touch.c"
     INCLUDE_DIRS
         "src"
     REQUIRES

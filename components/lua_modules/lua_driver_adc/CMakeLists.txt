@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-        "src/lua_module_adc.c"
+        "src/lua_driver_adc.c"
     INCLUDE_DIRS
         "src"
     REQUIRES

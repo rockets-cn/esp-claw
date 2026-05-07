@@ -12,8 +12,8 @@
 extern "C" {
 #endif
 
-int luaopen_uart(lua_State *L);
-esp_err_t lua_module_uart_register(void);
+int luaopen_gpio(lua_State *L);
+esp_err_t lua_driver_gpio_register(void);
 
 #ifdef __cplusplus
 }

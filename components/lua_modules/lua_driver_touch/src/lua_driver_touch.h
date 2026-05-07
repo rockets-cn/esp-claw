@@ -12,8 +12,8 @@
 extern "C" {
 #endif
 
-int luaopen_i2c(lua_State *L);
-esp_err_t lua_module_i2c_register(void);
+int luaopen_touch(lua_State *L);
+esp_err_t lua_driver_touch_register(void);
 
 #ifdef __cplusplus
 }

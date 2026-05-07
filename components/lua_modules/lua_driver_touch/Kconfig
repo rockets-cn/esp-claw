@@ -1,6 +1,6 @@
-menu "Lua Touch Module"
+menu "Lua Touch Driver"
 
-    config LUA_MODULE_TOUCH_DEFAULT_THRESHOLD_MILLI
+    config LUA_DRIVER_TOUCH_DEFAULT_THRESHOLD_MILLI
         int "Default touch threshold in permille"
         default 15
         range 1 500

@@ -12,8 +12,8 @@
 extern "C" {
 #endif
 
-int luaopen_mcpwm(lua_State *L);
-esp_err_t lua_module_mcpwm_register(void);
+int luaopen_i2c(lua_State *L);
+esp_err_t lua_driver_i2c_register(void);
 
 #ifdef __cplusplus
 }

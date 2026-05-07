@@ -1,9 +1,9 @@
 idf_component_register(
     SRCS
-        "src/lua_module_gpio.c"
+        "src/lua_driver_uart.c"
     INCLUDE_DIRS
         "src"
     REQUIRES
         cap_lua
-        driver
+        esp_driver_uart
 )

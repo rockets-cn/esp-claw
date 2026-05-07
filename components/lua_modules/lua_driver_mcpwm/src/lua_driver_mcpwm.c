@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "lua_module_mcpwm.h"
+#include "lua_driver_mcpwm.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,47 +15,47 @@
 #include "esp_log.h"
 #include "lauxlib.h"
 
-#define LUA_MODULE_MCPWM_METATABLE "mcpwm"
-#define LUA_MODULE_MCPWM_MAX_CHANNELS 2
-#define LUA_MODULE_MCPWM_DEFAULT_GROUP_ID 0
-#define LUA_MODULE_MCPWM_DEFAULT_RESOLUTION_HZ 1000000U
-#define LUA_MODULE_MCPWM_DEFAULT_FREQUENCY_HZ 1000U
-#define LUA_MODULE_MCPWM_DEFAULT_DUTY_PERCENT 50.0
+#define LUA_DRIVER_MCPWM_METATABLE "mcpwm"
+#define LUA_DRIVER_MCPWM_MAX_CHANNELS 2
+#define LUA_DRIVER_MCPWM_DEFAULT_GROUP_ID 0
+#define LUA_DRIVER_MCPWM_DEFAULT_RESOLUTION_HZ 1000000U
+#define LUA_DRIVER_MCPWM_DEFAULT_FREQUENCY_HZ 1000U
+#define LUA_DRIVER_MCPWM_DEFAULT_DUTY_PERCENT 50.0
 
-static const char *TAG = "lua_module_mcpwm";
+static const char *TAG = "lua_driver_mcpwm";
 
 typedef struct {
-    int gpio[LUA_MODULE_MCPWM_MAX_CHANNELS];
+    int gpio[LUA_DRIVER_MCPWM_MAX_CHANNELS];
     int group_id;
     uint32_t resolution_hz;
     uint32_t frequency_hz;
-    double duty_percent[LUA_MODULE_MCPWM_MAX_CHANNELS];
-    bool invert[LUA_MODULE_MCPWM_MAX_CHANNELS];
+    double duty_percent[LUA_DRIVER_MCPWM_MAX_CHANNELS];
+    bool invert[LUA_DRIVER_MCPWM_MAX_CHANNELS];
     uint8_t channel_count;
-} lua_module_mcpwm_config_t;
+} lua_driver_mcpwm_config_t;
 
 typedef struct {
     mcpwm_timer_handle_t timer;
     mcpwm_oper_handle_t oper;
-    mcpwm_cmpr_handle_t comparator[LUA_MODULE_MCPWM_MAX_CHANNELS];
-    mcpwm_gen_handle_t generator[LUA_MODULE_MCPWM_MAX_CHANNELS];
-    lua_module_mcpwm_config_t config;
+    mcpwm_cmpr_handle_t comparator[LUA_DRIVER_MCPWM_MAX_CHANNELS];
+    mcpwm_gen_handle_t generator[LUA_DRIVER_MCPWM_MAX_CHANNELS];
+    lua_driver_mcpwm_config_t config;
     uint32_t period_ticks;
     bool timer_enabled;
     bool running;
-} lua_module_mcpwm_ud_t;
+} lua_driver_mcpwm_ud_t;
 
-static lua_module_mcpwm_ud_t *lua_module_mcpwm_get_ud(lua_State *L, int idx)
+static lua_driver_mcpwm_ud_t *lua_driver_mcpwm_get_ud(lua_State *L, int idx)
 {
-    lua_module_mcpwm_ud_t *ud =
-        (lua_module_mcpwm_ud_t *)luaL_checkudata(L, idx, LUA_MODULE_MCPWM_METATABLE);
+    lua_driver_mcpwm_ud_t *ud =
+        (lua_driver_mcpwm_ud_t *)luaL_checkudata(L, idx, LUA_DRIVER_MCPWM_METATABLE);
     if (!ud || !ud->timer) {
         luaL_error(L, "mcpwm: invalid or closed handle");
     }
     return ud;
 }
 
-static esp_err_t lua_module_mcpwm_calc_period_ticks(uint32_t resolution_hz,
+static esp_err_t lua_driver_mcpwm_calc_period_ticks(uint32_t resolution_hz,
                                                     uint32_t frequency_hz,
                                                     uint32_t *period_ticks)
 {
@@ -70,7 +70,7 @@ static esp_err_t lua_module_mcpwm_calc_period_ticks(uint32_t resolution_hz,
     return ESP_OK;
 }
 
-static esp_err_t lua_module_mcpwm_apply_generator_actions(lua_module_mcpwm_ud_t *ud, uint8_t channel)
+static esp_err_t lua_driver_mcpwm_apply_generator_actions(lua_driver_mcpwm_ud_t *ud, uint8_t channel)
 {
     ESP_RETURN_ON_ERROR(mcpwm_generator_set_action_on_timer_event(
                             ud->generator[channel],
@@ -87,7 +87,7 @@ static esp_err_t lua_module_mcpwm_apply_generator_actions(lua_module_mcpwm_ud_t 
     return ESP_OK;
 }
 
-static esp_err_t lua_module_mcpwm_apply_duty(lua_module_mcpwm_ud_t *ud, uint8_t channel)
+static esp_err_t lua_driver_mcpwm_apply_duty(lua_driver_mcpwm_ud_t *ud, uint8_t channel)
 {
     int force_level = -1;
     if (ud->config.duty_percent[channel] <= 0.0) {
@@ -118,7 +118,7 @@ static esp_err_t lua_module_mcpwm_apply_duty(lua_module_mcpwm_ud_t *ud, uint8_t 
     return ESP_OK;
 }
 
-static esp_err_t lua_module_mcpwm_destroy(lua_module_mcpwm_ud_t *ud)
+static esp_err_t lua_driver_mcpwm_destroy(lua_driver_mcpwm_ud_t *ud)
 {
     esp_err_t first_err = ESP_OK;
     esp_err_t err;
@@ -148,7 +148,7 @@ static esp_err_t lua_module_mcpwm_destroy(lua_module_mcpwm_ud_t *ud)
         ud->timer_enabled = false;
     }
 
-    for (uint8_t i = 0; i < LUA_MODULE_MCPWM_MAX_CHANNELS; ++i) {
+    for (uint8_t i = 0; i < LUA_DRIVER_MCPWM_MAX_CHANNELS; ++i) {
         if (ud->generator[i]) {
             err = mcpwm_del_generator(ud->generator[i]);
             if (first_err == ESP_OK && err != ESP_OK) {
@@ -158,7 +158,7 @@ static esp_err_t lua_module_mcpwm_destroy(lua_module_mcpwm_ud_t *ud)
         }
     }
 
-    for (uint8_t i = 0; i < LUA_MODULE_MCPWM_MAX_CHANNELS; ++i) {
+    for (uint8_t i = 0; i < LUA_DRIVER_MCPWM_MAX_CHANNELS; ++i) {
         if (ud->comparator[i]) {
             err = mcpwm_del_comparator(ud->comparator[i]);
             if (first_err == ESP_OK && err != ESP_OK) {
@@ -187,11 +187,11 @@ static esp_err_t lua_module_mcpwm_destroy(lua_module_mcpwm_ud_t *ud)
     return first_err;
 }
 
-static esp_err_t lua_module_mcpwm_create(lua_module_mcpwm_ud_t *ud)
+static esp_err_t lua_driver_mcpwm_create(lua_driver_mcpwm_ud_t *ud)
 {
     esp_err_t err;
 
-    err = lua_module_mcpwm_calc_period_ticks(ud->config.resolution_hz,
+    err = lua_driver_mcpwm_calc_period_ticks(ud->config.resolution_hz,
                                              ud->config.frequency_hz,
                                              &ud->period_ticks);
     if (err != ESP_OK) {
@@ -251,12 +251,12 @@ static esp_err_t lua_module_mcpwm_create(lua_module_mcpwm_ud_t *ud)
             goto fail;
         }
 
-        err = lua_module_mcpwm_apply_generator_actions(ud, i);
+        err = lua_driver_mcpwm_apply_generator_actions(ud, i);
         if (err != ESP_OK) {
             goto fail;
         }
 
-        err = lua_module_mcpwm_apply_duty(ud, i);
+        err = lua_driver_mcpwm_apply_duty(ud, i);
         if (err != ESP_OK) {
             goto fail;
         }
@@ -271,20 +271,20 @@ static esp_err_t lua_module_mcpwm_create(lua_module_mcpwm_ud_t *ud)
     return ESP_OK;
 
 fail:
-    lua_module_mcpwm_destroy(ud);
+    lua_driver_mcpwm_destroy(ud);
     return err;
 }
 
-static void lua_module_mcpwm_parse_config(lua_State *L, int idx, lua_module_mcpwm_config_t *config)
+static void lua_driver_mcpwm_parse_config(lua_State *L, int idx, lua_driver_mcpwm_config_t *config)
 {
     luaL_checktype(L, idx, LUA_TTABLE);
 
-    config->group_id = LUA_MODULE_MCPWM_DEFAULT_GROUP_ID;
-    config->resolution_hz = LUA_MODULE_MCPWM_DEFAULT_RESOLUTION_HZ;
-    config->frequency_hz = LUA_MODULE_MCPWM_DEFAULT_FREQUENCY_HZ;
+    config->group_id = LUA_DRIVER_MCPWM_DEFAULT_GROUP_ID;
+    config->resolution_hz = LUA_DRIVER_MCPWM_DEFAULT_RESOLUTION_HZ;
+    config->frequency_hz = LUA_DRIVER_MCPWM_DEFAULT_FREQUENCY_HZ;
     config->channel_count = 1;
-    for (uint8_t i = 0; i < LUA_MODULE_MCPWM_MAX_CHANNELS; ++i) {
-        config->duty_percent[i] = LUA_MODULE_MCPWM_DEFAULT_DUTY_PERCENT;
+    for (uint8_t i = 0; i < LUA_DRIVER_MCPWM_MAX_CHANNELS; ++i) {
+        config->duty_percent[i] = LUA_DRIVER_MCPWM_DEFAULT_DUTY_PERCENT;
         config->invert[i] = false;
         config->gpio[i] = -1;
     }
@@ -372,8 +372,8 @@ static void lua_module_mcpwm_parse_config(lua_State *L, int idx, lua_module_mcpw
     }
 }
 
-static uint8_t lua_module_mcpwm_get_channel_index(lua_State *L,
-                                                  lua_module_mcpwm_ud_t *ud,
+static uint8_t lua_driver_mcpwm_get_channel_index(lua_State *L,
+                                                  lua_driver_mcpwm_ud_t *ud,
                                                   int arg_idx,
                                                   bool optional)
 {
@@ -391,19 +391,19 @@ static uint8_t lua_module_mcpwm_get_channel_index(lua_State *L,
     return (uint8_t)(channel - 1);
 }
 
-static int lua_module_mcpwm_gc(lua_State *L)
+static int lua_driver_mcpwm_gc(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud =
-        (lua_module_mcpwm_ud_t *)luaL_testudata(L, 1, LUA_MODULE_MCPWM_METATABLE);
+    lua_driver_mcpwm_ud_t *ud =
+        (lua_driver_mcpwm_ud_t *)luaL_testudata(L, 1, LUA_DRIVER_MCPWM_METATABLE);
     if (ud) {
-        lua_module_mcpwm_destroy(ud);
+        lua_driver_mcpwm_destroy(ud);
     }
     return 0;
 }
 
-static int lua_module_mcpwm_start(lua_State *L)
+static int lua_driver_mcpwm_start(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud = lua_module_mcpwm_get_ud(L, 1);
+    lua_driver_mcpwm_ud_t *ud = lua_driver_mcpwm_get_ud(L, 1);
     if (!ud->running) {
         esp_err_t err = mcpwm_timer_start_stop(ud->timer, MCPWM_TIMER_START_NO_STOP);
         if (err != ESP_OK) {
@@ -414,9 +414,9 @@ static int lua_module_mcpwm_start(lua_State *L)
     return 0;
 }
 
-static int lua_module_mcpwm_stop(lua_State *L)
+static int lua_driver_mcpwm_stop(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud = lua_module_mcpwm_get_ud(L, 1);
+    lua_driver_mcpwm_ud_t *ud = lua_driver_mcpwm_get_ud(L, 1);
     if (ud->running) {
         esp_err_t err = mcpwm_timer_start_stop(ud->timer, MCPWM_TIMER_STOP_EMPTY);
         if (err != ESP_OK) {
@@ -427,9 +427,9 @@ static int lua_module_mcpwm_stop(lua_State *L)
     return 0;
 }
 
-static int lua_module_mcpwm_set_enabled(lua_State *L)
+static int lua_driver_mcpwm_set_enabled(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud = lua_module_mcpwm_get_ud(L, 1);
+    lua_driver_mcpwm_ud_t *ud = lua_driver_mcpwm_get_ud(L, 1);
     if (lua_toboolean(L, 2)) {
         if (!ud->running) {
             esp_err_t err = mcpwm_timer_start_stop(ud->timer, MCPWM_TIMER_START_NO_STOP);
@@ -448,14 +448,14 @@ static int lua_module_mcpwm_set_enabled(lua_State *L)
     return 0;
 }
 
-static int lua_module_mcpwm_set_duty(lua_State *L)
+static int lua_driver_mcpwm_set_duty(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud = lua_module_mcpwm_get_ud(L, 1);
+    lua_driver_mcpwm_ud_t *ud = lua_driver_mcpwm_get_ud(L, 1);
     uint8_t channel = 0;
     double duty_percent = 0.0;
 
     if (lua_gettop(L) >= 3) {
-        channel = lua_module_mcpwm_get_channel_index(L, ud, 2, false);
+        channel = lua_driver_mcpwm_get_channel_index(L, ud, 2, false);
         duty_percent = luaL_checknumber(L, 3);
     } else {
         channel = 0;
@@ -467,16 +467,16 @@ static int lua_module_mcpwm_set_duty(lua_State *L)
     }
 
     ud->config.duty_percent[channel] = duty_percent;
-    esp_err_t err = lua_module_mcpwm_apply_duty(ud, channel);
+    esp_err_t err = lua_driver_mcpwm_apply_duty(ud, channel);
     if (err != ESP_OK) {
         return luaL_error(L, "mcpwm set_duty failed: %s", esp_err_to_name(err));
     }
     return 0;
 }
 
-static int lua_module_mcpwm_set_frequency(lua_State *L)
+static int lua_driver_mcpwm_set_frequency(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud = lua_module_mcpwm_get_ud(L, 1);
+    lua_driver_mcpwm_ud_t *ud = lua_driver_mcpwm_get_ud(L, 1);
     uint32_t frequency_hz = (uint32_t)luaL_checkinteger(L, 2);
     if (frequency_hz == 0) {
         return luaL_error(L, "mcpwm frequency_hz must be > 0");
@@ -486,7 +486,7 @@ static int lua_module_mcpwm_set_frequency(lua_State *L)
     }
 
     uint32_t period_ticks = 0;
-    esp_err_t err = lua_module_mcpwm_calc_period_ticks(ud->config.resolution_hz,
+    esp_err_t err = lua_driver_mcpwm_calc_period_ticks(ud->config.resolution_hz,
                                                        frequency_hz,
                                                        &period_ticks);
     if (err != ESP_OK) {
@@ -501,7 +501,7 @@ static int lua_module_mcpwm_set_frequency(lua_State *L)
     ud->config.frequency_hz = frequency_hz;
     ud->period_ticks = period_ticks;
     for (uint8_t i = 0; i < ud->config.channel_count; ++i) {
-        err = lua_module_mcpwm_apply_duty(ud, i);
+        err = lua_driver_mcpwm_apply_duty(ud, i);
         if (err != ESP_OK) {
             return luaL_error(L, "mcpwm set_frequency failed: %s", esp_err_to_name(err));
         }
@@ -509,77 +509,77 @@ static int lua_module_mcpwm_set_frequency(lua_State *L)
     return 0;
 }
 
-static int lua_module_mcpwm_get_channel_count(lua_State *L)
+static int lua_driver_mcpwm_get_channel_count(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud = lua_module_mcpwm_get_ud(L, 1);
+    lua_driver_mcpwm_ud_t *ud = lua_driver_mcpwm_get_ud(L, 1);
     lua_pushinteger(L, ud->config.channel_count);
     return 1;
 }
 
-static int lua_module_mcpwm_close(lua_State *L)
+static int lua_driver_mcpwm_close(lua_State *L)
 {
-    lua_module_mcpwm_ud_t *ud =
-        (lua_module_mcpwm_ud_t *)luaL_checkudata(L, 1, LUA_MODULE_MCPWM_METATABLE);
-    esp_err_t err = lua_module_mcpwm_destroy(ud);
+    lua_driver_mcpwm_ud_t *ud =
+        (lua_driver_mcpwm_ud_t *)luaL_checkudata(L, 1, LUA_DRIVER_MCPWM_METATABLE);
+    esp_err_t err = lua_driver_mcpwm_destroy(ud);
     if (err != ESP_OK) {
         return luaL_error(L, "mcpwm close failed: %s", esp_err_to_name(err));
     }
     return 0;
 }
 
-static int lua_module_mcpwm_new(lua_State *L)
+static int lua_driver_mcpwm_new(lua_State *L)
 {
-    lua_module_mcpwm_config_t config = {0};
-    lua_module_mcpwm_parse_config(L, 1, &config);
+    lua_driver_mcpwm_config_t config = {0};
+    lua_driver_mcpwm_parse_config(L, 1, &config);
 
-    lua_module_mcpwm_ud_t *ud =
-        (lua_module_mcpwm_ud_t *)lua_newuserdata(L, sizeof(*ud));
-    *ud = (lua_module_mcpwm_ud_t) {
+    lua_driver_mcpwm_ud_t *ud =
+        (lua_driver_mcpwm_ud_t *)lua_newuserdata(L, sizeof(*ud));
+    *ud = (lua_driver_mcpwm_ud_t) {
         .config = config,
     };
 
-    esp_err_t err = lua_module_mcpwm_create(ud);
+    esp_err_t err = lua_driver_mcpwm_create(ud);
     if (err != ESP_OK) {
-        lua_module_mcpwm_destroy(ud);
+        lua_driver_mcpwm_destroy(ud);
         return luaL_error(L, "mcpwm new failed: %s", esp_err_to_name(err));
     }
 
-    luaL_getmetatable(L, LUA_MODULE_MCPWM_METATABLE);
+    luaL_getmetatable(L, LUA_DRIVER_MCPWM_METATABLE);
     lua_setmetatable(L, -2);
     return 1;
 }
 
 int luaopen_mcpwm(lua_State *L)
 {
-    if (luaL_newmetatable(L, LUA_MODULE_MCPWM_METATABLE)) {
-        lua_pushcfunction(L, lua_module_mcpwm_gc);
+    if (luaL_newmetatable(L, LUA_DRIVER_MCPWM_METATABLE)) {
+        lua_pushcfunction(L, lua_driver_mcpwm_gc);
         lua_setfield(L, -2, "__gc");
         lua_pushvalue(L, -1);
         lua_setfield(L, -2, "__index");
-        lua_pushcfunction(L, lua_module_mcpwm_start);
+        lua_pushcfunction(L, lua_driver_mcpwm_start);
         lua_setfield(L, -2, "start");
-        lua_pushcfunction(L, lua_module_mcpwm_stop);
+        lua_pushcfunction(L, lua_driver_mcpwm_stop);
         lua_setfield(L, -2, "stop");
-        lua_pushcfunction(L, lua_module_mcpwm_set_duty);
+        lua_pushcfunction(L, lua_driver_mcpwm_set_duty);
         lua_setfield(L, -2, "set_duty");
-        lua_pushcfunction(L, lua_module_mcpwm_set_frequency);
+        lua_pushcfunction(L, lua_driver_mcpwm_set_frequency);
         lua_setfield(L, -2, "set_frequency");
-        lua_pushcfunction(L, lua_module_mcpwm_get_channel_count);
+        lua_pushcfunction(L, lua_driver_mcpwm_get_channel_count);
         lua_setfield(L, -2, "get_channel_count");
-        lua_pushcfunction(L, lua_module_mcpwm_set_enabled);
+        lua_pushcfunction(L, lua_driver_mcpwm_set_enabled);
         lua_setfield(L, -2, "set_enabled");
-        lua_pushcfunction(L, lua_module_mcpwm_close);
+        lua_pushcfunction(L, lua_driver_mcpwm_close);
         lua_setfield(L, -2, "close");
     }
     lua_pop(L, 1);
 
     lua_newtable(L);
-    lua_pushcfunction(L, lua_module_mcpwm_new);
+    lua_pushcfunction(L, lua_driver_mcpwm_new);
     lua_setfield(L, -2, "new");
     return 1;
 }
 
-esp_err_t lua_module_mcpwm_register(void)
+esp_err_t lua_driver_mcpwm_register(void)
 {
     return cap_lua_register_module("mcpwm", luaopen_mcpwm);
 }
