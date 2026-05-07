@@ -6,6 +6,10 @@
 
 * Online Flashing Tool: Supports flashing firmware with different console outputs
 
+### Change:
+
+* Merged Feishu, QQ, Telegram, WeChat, and IM attachment sources, Skills, and docs into the unified `cap_im_platform` component while keeping existing per-platform runtime group IDs and tool names.
+
 ## 2026-05-06
 
 ### Feature:
