@@ -4,7 +4,11 @@
 
 ### Tools:
 
-* Online Flashing Tool: Supports flashing firmware with different console outputs
+* Online Flashing Tool: Supported flashing firmware with different console outputs
+
+### Fix:
+
+* Added WebSocket heartbeat support to Web Chat for improved reliability. (https://github.com/espressif/esp-claw/issues/36)
 
 ## 2026-05-06
 
