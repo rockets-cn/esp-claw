@@ -1,5 +1,11 @@
 # ChangeLog
 
+## 2026-05-07
+
+### Tools:
+
+* Online Flashing Tool: Supports flashing firmware with different console outputs
+
 ## 2026-05-06
 
 ### Feature:
